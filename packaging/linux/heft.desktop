@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Heft
+GenericName=Disk Usage Analyzer
+Comment=See what's filling your disks
+Exec=heft %f
+Icon=heft
+Terminal=false
+Categories=System;Utility;FileTools;Filesystem;
+Keywords=disk;space;usage;treemap;duplicates;cleanup;
+StartupWMClass=heft

@@ -1,0 +1,60 @@
+name: Bug report
+description: Something doesn't work, or a size looks wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! If this could make Heft delete or change the
+        wrong files or registry entries, please report it privately instead
+        (see SECURITY.md).
+
+        Please check that anything you paste doesn't show private file names or
+        paths. The demo disk (`HEFT_DEMO=1`) is handy for UI issues.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, macOS, Linux, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Heft version or commit
+      placeholder: 0.1.0, or the commit you built from
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scanning / sizes
+        - Treemap / folder tree
+        - Duplicates / largest files / build junk
+        - Changes (scan history)
+        - Junk cleaner
+        - Startup programs
+        - Installed programs / updates
+        - Registry issues
+        - Something else
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Scan ...
+        2. Click ...
+  - type: textarea
+    id: bench
+    attributes:
+      label: Scan output (for wrong sizes)
+      description: Output of `heft --bench <path>`, or on Windows as administrator `heft --compare C:`.
+      render: text

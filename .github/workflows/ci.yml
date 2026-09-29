@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test
+
+      - name: Build
+        run: cargo build --release
+
+      # Exercises the real scanner on this OS (portable walker on macOS/Linux).
+      - name: Smoke test
+        shell: bash
+        run: |
+          bin=target/release/heft
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --bench . --out bench.txt
+          cat bench.txt
+          grep -q "^files" bench.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heft-${{ runner.os }}
+          path: |
+            target/release/heft
+            target/release/heft.exe
+          if-no-files-found: ignore
+
+  macos-app:
+    name: Heft.app (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: bash scripts/bundle-macos.sh
+      - run: ditto -c -k --keepParent target/Heft.app Heft-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Heft-macos
+          path: Heft-macos.zip

@@ -1,0 +1,40 @@
+[package]
+name = "heft"
+version = "0.1.0"
+edition = "2024"
+description = "Disk usage analyzer and cleanup tool with a treemap, duplicate finder and scan history"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/gjnail/heft"
+keywords = ["disk-usage", "treemap", "cleaner", "duplicates", "windirstat"]
+categories = ["filesystem", "gui", "command-line-utilities"]
+exclude = ["docs/*.png"]
+
+[dependencies]
+crossbeam-channel = "0.5"
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+lz4_flex = "0.14"
+png = "0.18"
+rayon = "1"
+rfd = "0.17"
+trash = "5"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_Security", "Win32_System_Threading", "Win32_System_Time", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_System_DataExchange", "Win32_System_Environment"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Linux needs a windowing backend picked explicitly.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.36", default-features = false, features = ["x11", "wayland"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,28 @@
+name: Feature request
+description: An idea that would make keeping a computer clean and organized easier
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation or problem first, before a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: textarea
+    id: safety
+    attributes:
+      label: If it removes or changes anything, how would you keep it safe?
+      description: For example, what the confirmation should show, whether it can go to the Recycle Bin / Trash, or how it can be undone.
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms
+      options:
+        - label: Windows
+        - label: macOS
+        - label: Linux
