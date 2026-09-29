@@ -1,5 +1,7 @@
 # Heft
 
+[![Support Heft on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20Heft-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/gnail)
+
 Heft is a disk usage analyzer and cleanup tool. It runs on Windows today, and
 macOS and Linux builds are in progress.
 
@@ -172,6 +174,11 @@ and the rules for anything that removes data. Please report problems that
 could delete the wrong files privately; see [SECURITY.md](SECURITY.md).
 
 Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Support
+
+Heft is free. If it saved you some space and you'd like to say thanks, you can
+[buy me a coffee on Ko-fi](https://ko-fi.com/gnail).
 
 ## License
 
