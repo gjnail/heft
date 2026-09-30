@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hardware monitor · Heft</title>
+  <meta name="description" content="How to use Heft's hardware monitor: the dashboard, the sensor table, history charts, CSV logging, and setting up PawnIO for CPU temperatures on Windows.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html" aria-current="page">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Hardware monitor</h1>
+    <span class="platforms">Windows · Linux</span>
+    <p class="lede">The Hardware page shows temperatures, load, clocks, power and fans for every device in your computer, live, with history.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#dashboard">Dashboard</a></li>
+        <li><a href="#table">All sensors</a></li>
+        <li><a href="#charts">History charts</a></li>
+        <li><a href="#logging">Logging and settings</a></li>
+        <li><a href="#what">What Heft can read</a></li>
+        <li><a href="#pawnio">CPU temperature and board sensors on Windows</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="dashboard">Dashboard</h2>
+    <figure class="shot">
+      <a href="../images/hardware.webp"><img src="../images/hardware.webp" width="1360" height="860" loading="lazy" alt="The Hardware dashboard with gauges for CPU load, GPU temperature and load, memory and the hottest drive, and a card for each device"></a>
+      <figcaption>The dashboard on a PC without PawnIO set up: everything but the CPU temperature is already there.</figcaption>
+    </figure>
+    <p>The top row shows what most people want to know: CPU temperature and load, GPU temperature and load, memory in use, and the hottest drive. Below it, every device gets a card with its most useful readings.</p>
+    <p>Temperatures are labeled <strong>Normal</strong>, <strong>Warm</strong>, <strong>Hot</strong> or <strong>Too hot</strong>. Heft uses the device's own limits where it reports them, and sensible defaults otherwise. Hover over the label to see the thresholds.</p>
+
+    <h2 id="table">All sensors</h2>
+    <p>Switch to <strong>All sensors</strong> for a table of every reading, grouped by device, like HWMonitor: the current value, the minimum, maximum and average since Heft started, and a small chart of the last two minutes. <strong>Reset min/max</strong> starts the counts over, which is handy before a stress test or a game.</p>
+
+    <h2 id="charts">History charts</h2>
+    <figure class="shot">
+      <a href="../images/hardware-chart.webp"><img src="../images/hardware-chart.webp" width="1360" height="860" loading="lazy" alt="A one-minute history chart of total CPU load above the sensor table"></a>
+      <figcaption>Click any reading for its history. Ctrl-click another reading of the same kind to compare them on one chart.</figcaption>
+    </figure>
+    <p>Click any reading, on the dashboard or in the table, to open a chart of its history over the last 1, 5 or 10 minutes, with its minimum, average and maximum. <kbd>Ctrl</kbd>-click more readings of the same kind, such as two temperatures or several cores, to compare them. Heft keeps ten minutes of history for every reading.</p>
+
+    <h2 id="logging">Logging and settings</h2>
+    <ul>
+      <li><strong>Log to CSV</strong> writes every reading to a spreadsheet file while Heft runs. The button shows how many rows it has written; click it again to stop.</li>
+      <li><strong>°C / °F</strong> switches between Celsius and Fahrenheit.</li>
+      <li><strong>Every 1 s</strong> sets how often Heft reads the sensors: every 0.5, 1, 2 or 5 seconds.</li>
+    </ul>
+    <p>Heft starts reading sensors the first time you open the Hardware page, and keeps collecting history from then on, even while you're on another page. If you never open it, Heft never reads a sensor.</p>
+
+    <h2 id="what">What Heft can read</h2>
+    <p><strong>Windows, with nothing extra installed:</strong></p>
+    <ul>
+      <li>CPU load and clock speed, per core;</li>
+      <li>NVIDIA graphics cards through NVIDIA's own library (temperature, load, clocks, power, fans, memory), and other graphics cards through Windows' graphics kernel, the same source Task Manager uses;</li>
+      <li>drive temperatures, plus SMART data for older SATA drives when run as administrator;</li>
+      <li>disk and network throughput, memory and batteries.</li>
+    </ul>
+    <p><strong>Windows, with PawnIO installed and Heft running as administrator,</strong> also: CPU temperature and package power on AMD Zen and Intel processors, and fans, fan drive, voltages and board temperatures from the Nuvoton sensor chips (NCT679x and NCT6701D) on most ASUS and ASRock motherboards.</p>
+    <p><strong>Linux:</strong> the same page from <code>/proc</code> and <code>/sys/class/hwmon</code>, with no extra driver. What you see depends on which sensor drivers your kernel loads.</p>
+    <p>macOS isn't supported yet.</p>
+
+    <h2 id="pawnio">CPU temperature and board sensors on Windows</h2>
+    <p>Windows doesn't let normal programs read the CPU's temperature or the motherboard's fan and voltage chip. That needs a kernel driver. Heft uses <a href="https://pawnio.eu">PawnIO</a>, a signed, open-source driver that LibreHardwareMonitor and FanControl also use. Heft never installs drivers itself, so this step is up to you.</p>
+    <ol>
+      <li>Install PawnIO from <a href="https://pawnio.eu">pawnio.eu</a>, or from a terminal:
+        <pre><code>winget install namazso.PawnIO</code></pre>
+      </li>
+      <li>Open Heft's Hardware page and choose <strong>Restart as administrator</strong>. Windows only lets administrators use the driver.</li>
+    </ol>
+    <p>Heft loads three of PawnIO's official signed modules: one each for AMD and Intel processors, and one for the motherboard's sensor chip. It only reads sensor registers and never touches fan control. It also waits its turn on the chip, so it can run alongside other monitoring tools without them getting in each other's way.</p>
+    <div class="note">
+      <p>Without PawnIO, the page still works and says what's missing. Gigabyte boards (ITE chips) and MSI boards with the NCT6687D chip aren't supported yet.</p>
+    </div>
+    <p>To print every reading in a terminal, run <code>heft --sensors</code>. See <a href="command-line.html">Command line</a>.</p>
+
+    <div class="pager">
+      <a href="cleaner.html"><small>Previous</small>The Cleaner</a>
+      <a class="next" href="windows-tools.html"><small>Next</small>Startup, programs and registry</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

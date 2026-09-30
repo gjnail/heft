@@ -55,6 +55,17 @@ its own and logs the result to `heft-tray-selftest.txt` in the temp folder.
 `HEFT_HISTORY_DIR` and `HEFT_DATA_DIR` move scan history and the removed list
 somewhere else, so tests don't touch your own.
 
+`HEFT_DEBUG_SCREENSHOT=<file.png>` saves the window after
+`HEFT_DEBUG_SCREENSHOT_DELAY` seconds (default 3) and quits, on any page.
+`HEFT_DEBUG_THEME=light` or `dark` and `HEFT_DEBUG_SIZE=<width>x<height>` set
+the window up first. On the Hardware page the delay counts sensor readings
+instead, and `HEFT_DEBUG_HW_VIEW` (`dashboard` or `table`) and
+`HEFT_DEBUG_HW_FOCUS=<sensor label>` pick what's shown. Open other pages with
+`--open=cleaner`, `--open=hardware` and so on. The screenshots in
+`site/images` are taken this way at 1360x860 in the light theme and converted
+to WebP. These runs save view settings such as the color mode like any other
+run, so reset them afterwards.
+
 Some tests change real system state, so they're ignored by default. `cargo
 test -- --ignored` moves a file to the Recycle Bin and restores it, shows a
 notification-area icon for a moment, and adds and removes the Start with
@@ -78,16 +89,17 @@ cargo check --all-targets --target aarch64-apple-darwin
 CI builds and tests on Windows, macOS and Ubuntu for every push and pull
 request.
 
-The Windows-only modules (MFT scanner, cleaner, startup, programs, registry,
-winget) are declared with `#[cfg(windows)]` in `main.rs`. Shared code must not
-call them directly.
+The Windows-only modules (MFT scanner, startup, programs, registry, winget,
+notification-area icon) are declared with `#[cfg(windows)]` in `main.rs`.
+Shared code must not call them directly. The cleaner is shared, with its
+OS-specific parts in `clean/windows.rs` and `clean/unix.rs`.
 
 ## Source layout
 
 ```
 src/
   main.rs               entry point, window setup
-  cli.rs                command line: --bench, --export, --compare, --check-refresh, --render, --clean, --icon
+  cli.rs                command line: --bench, --export, --compare, --check-refresh, --render, --clean, --sensors, --icon
   demo.rs               the made-up demo disk (HEFT_DEMO)
   tree.rs               arena tree of the scan results
   scan/mft.rs           NTFS master file table reader and change journal rescans (Windows)
@@ -110,7 +122,7 @@ src/
   colors.rs             file categories and color schemes
   icon.rs               app icon, drawn at any size
   platform/             OS integration: drives, trash, file manager, dates
-  clean/                junk cleaner and its rule catalog (Windows)
+  clean/                junk cleaner; rules.rs is the Windows catalog, rules_unix.rs macOS and Linux
   startup.rs            startup programs (Windows)
   programs.rs           installed programs and leftovers (Windows)
   regclean.rs, reg.rs   registry issues, registry access and .reg backups (Windows)
@@ -124,6 +136,7 @@ fuzz/                   cargo-fuzz target for the MFT record parser
 packaging/linux/        desktop entry
 packaging/windows/      SignPath code signing configuration
 scripts/                macOS app bundle, Linux install and winget manifest scripts
+site/                   the website (GitHub Pages): plain HTML and CSS, with the screenshots in images/
 ```
 
 Releases are built by GitHub Actions; [docs/releasing.md](docs/releasing.md)

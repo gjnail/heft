@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tutorial: your first cleanup · Heft</title>
+  <meta name="description" content="A ten-minute walk through a first session with Heft: scan a drive, read the map, act on suggestions, delete safely and clear caches.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><img src="images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="tutorial.html" aria-current="page">Tutorial</a>
+      <a href="guides/index.html">Guides</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="tutorial.html" aria-current="page">Tutorial</a></li>
+      <li><a href="faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="guides/disk-usage.html">Finding what uses space</a></li>
+      <li><a href="guides/cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="guides/duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="guides/cleaner.html">The Cleaner</a></li>
+      <li><a href="guides/hardware.html">Hardware monitor</a></li>
+      <li><a href="guides/windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="guides/alerts.html">Free space alerts</a></li>
+      <li><a href="guides/command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <h1>Tutorial: your first cleanup</h1>
+    <p class="lede">This walks you through a first session with Heft: scanning a drive, reading the map, acting on suggestions, deleting safely and clearing caches. It takes about ten minutes.</p>
+    <p>The steps show Windows. macOS and Linux work the same way unless a step says otherwise. The disk screenshots use Heft's demo disk, so the files in them are made up.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>Steps</strong>
+      <ol>
+        <li><a href="#download">Download and open Heft</a></li>
+        <li><a href="#scan">Scan a drive</a></li>
+        <li><a href="#map">Read the map</a></li>
+        <li><a href="#suggestions">Start with Suggestions</a></li>
+        <li><a href="#hunt">Look for big files yourself</a></li>
+        <li><a href="#delete">Delete safely</a></li>
+        <li><a href="#undo">Put something back</a></li>
+        <li><a href="#cleaner">Clear caches with the Cleaner</a></li>
+        <li><a href="#tidy">Keep it tidy</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="download" class="step-title"><span class="n">1</span>Download and open Heft</h2>
+    <p>Go to the <a href="https://github.com/gjnail/heft/releases/latest">latest release</a> and download the file for your system. Heft is a single program with no installer.</p>
+    <ul>
+      <li><strong>Windows 10 and 11:</strong> unzip <code>heft-&lt;version&gt;-windows-x86_64.zip</code> into any folder and run <code>heft.exe</code>.</li>
+      <li><strong>macOS 11 and later:</strong> unzip <code>heft-&lt;version&gt;-macos-universal.zip</code> and move Heft to Applications.</li>
+      <li><strong>Linux:</strong> extract <code>heft-&lt;version&gt;-linux-x86_64.tar.gz</code> and run <code>./heft</code>. Run <code>bash scripts/install-linux.sh</code> in the same folder to add Heft to your app launcher.</li>
+    </ul>
+    <div class="note">
+      <p><strong>A warning the first time is expected.</strong> The downloads aren't code-signed yet. On Windows, "Windows protected your PC" appears: click <strong>More info</strong>, then <strong>Run anyway</strong>. On macOS, open System Settings &gt; Privacy &amp; Security and click <strong>Open Anyway</strong>. See the <a href="faq.html#unsigned">FAQ</a> if Windows doesn't offer that choice.</p>
+    </div>
+
+    <h2 id="scan" class="step-title"><span class="n">2</span>Scan a drive</h2>
+    <p>The start screen asks what's filling your disks and lists your drives with their free space. Click one to scan it, or choose <strong>Scan a folder</strong> to look at just one folder. You can also drop a folder onto the window.</p>
+    <p>On Windows, Heft offers to <strong>Restart as administrator</strong>. Take it if you can: as administrator on an NTFS drive, Heft reads the drive's master file table directly, which takes seconds instead of minutes. Without it, Heft scans folders in parallel. That works everywhere, just more slowly.</p>
+    <p>While it scans you see how many folders it has read, the size so far and the time taken.</p>
+
+    <h2 id="map" class="step-title"><span class="n">3</span>Read the map</h2>
+    <figure class="shot">
+      <a href="images/overview.webp"><img src="images/overview.webp" width="1360" height="860" loading="lazy" alt="The Folders tab next to the treemap, with the Edits folder selected in both"></a>
+      <figcaption>The folder tree on the left and the treemap on the right show the same thing two ways. Selecting in one selects in the other.</figcaption>
+    </figure>
+    <p>The <strong>treemap</strong> on the right shows every file as a rectangle. The bigger the rectangle, the more space the file takes. Files in the same folder sit together, shaded like a cushion, so large folders stand out as blocks. The biggest rectangles are labeled.</p>
+    <ul>
+      <li><strong>Click</strong> a rectangle to select it. The folder tree jumps to it.</li>
+      <li><strong>Double-click</strong> or press <kbd>Enter</kbd> to zoom into a folder. <kbd>Backspace</kbd> or the mouse back button zooms out.</li>
+      <li><strong>Hover</strong> over anything to see its path and size.</li>
+    </ul>
+    <p>The <strong>Folders</strong> tab on the left lists the same folders with their size, share of the parent folder, number of files and the date anything inside last changed. Folders are sorted biggest first, so the answer to "where did my space go" is usually in the first few rows.</p>
+    <p>Try <strong>Color by &gt; Age</strong> in the toolbar. Recent files turn warm, old ones turn cool, and forgotten corners of the drive become easy to see.</p>
+
+    <h2 id="suggestions" class="step-title"><span class="n">4</span>Start with Suggestions</h2>
+    <figure class="shot">
+      <a href="images/suggestions.webp"><img src="images/suggestions.webp" width="1360" height="860" loading="lazy" alt="The Suggestions tab listing big old files, old installers in Downloads and the hibernation file"></a>
+      <figcaption>Each suggestion shows how much space it would free and why it's there.</figcaption>
+    </figure>
+    <p>Open the <strong>Suggestions</strong> tab. Heft goes through the scan and lists things that are usually safe to remove: old installers in Downloads, build folders in projects you haven't touched in six months, Steam games you haven't played in a year, huge logs and crash dumps, and big files nobody has opened in years.</p>
+    <ul>
+      <li>Only clearly disposable items are ticked for you. Everything else you tick yourself.</li>
+      <li>Click any item to see it in the map before you decide.</li>
+      <li>Press <strong>Move selected to the Recycle Bin</strong> when you're happy with the selection.</li>
+    </ul>
+    <p>Some suggestions aren't things Heft deletes. The hibernation file and a leftover <code>Windows.old</code> folder, for example, come with the steps to remove them with Windows' own tools, because that's the safe way to do it.</p>
+
+    <h2 id="hunt" class="step-title"><span class="n">5</span>Look for big files yourself</h2>
+    <figure class="shot">
+      <a href="images/age.webp"><img src="images/age.webp" width="1360" height="860" loading="lazy" alt="The Search tab listing the largest files, next to a treemap colored by file age"></a>
+      <figcaption>With no search text, the Search tab lists the largest files in the scan.</figcaption>
+    </figure>
+    <p>The <strong>Search</strong> tab starts out as a list of the largest files. Narrow it down:</p>
+    <ul>
+      <li>Type part of a name, an extension such as <code>.iso</code>, or a pattern such as <code>backup*</code>.</li>
+      <li>Set <strong>at least</strong> to 1 GB and <strong>modified</strong> to "over a year ago" to find big files you've forgotten about.</li>
+      <li>Everything that matches can go to the Recycle Bin in one step.</li>
+    </ul>
+    <p>The <strong>File types</strong> tab adds up space by kind of file (video, games, programs, archives) and by extension. Click a row to light those files up in the treemap.</p>
+
+    <h2 id="delete" class="step-title"><span class="n">6</span>Delete safely</h2>
+    <figure class="shot">
+      <a href="images/delete-warning.webp"><img src="images/delete-warning.webp" width="1360" height="860" loading="lazy" alt="A dialog asking to move System32 to the Recycle Bin, warning that it is part of Windows"></a>
+      <figcaption>Deleting part of Windows needs an extra tick, and the dialog says what to use instead.</figcaption>
+    </figure>
+    <p>To remove something, right-click it and choose <strong>Move to Recycle Bin</strong>, or select it and press <kbd>Delete</kbd> (<kbd>Cmd</kbd>+<kbd>Backspace</kbd> on a Mac). Heft always asks first and shows how many files and how much space are involved.</p>
+    <p>Look out for the warning triangles in the tree. Heft marks system folders, installed programs, app data, cloud-synced folders, keys, mailboxes and saved games, and explains what could go wrong if you delete them. A red warning means the computer might not start afterwards; you have to tick a box to go ahead.</p>
+    <p>Files go to the Recycle Bin or Trash, not straight into oblivion. The space comes back when you empty it.</p>
+
+    <h2 id="undo" class="step-title"><span class="n">7</span>Put something back</h2>
+    <p>Deleted the wrong thing? The <strong>Removed</strong> tab lists everything Heft has moved to the Recycle Bin or Trash. On Windows and Linux, select items and press <strong>Put back</strong>. On macOS, open the Trash in Finder and use Put Back. Rescan to see them in the map again.</p>
+
+    <h2 id="cleaner" class="step-title"><span class="n">8</span>Clear caches with the Cleaner</h2>
+    <figure class="shot">
+      <a href="images/cleaner.webp"><img src="images/cleaner.webp" width="1360" height="860" loading="lazy" alt="The Cleaner page with rules grouped by Windows, Browsers and Applications, and results sorted by size"></a>
+      <figcaption>The Cleaner analyzes as soon as you open it. Nothing is removed until you press Clean.</figcaption>
+    </figure>
+    <p>Switch to the <strong>Cleaner</strong> page at the top. It checks a fixed list of known cache and temporary-file locations for your system, browsers and apps, and shows how much each would free.</p>
+    <ul>
+      <li>Click a row in the results to see exactly which files would be removed.</li>
+      <li>A program that's running is skipped. Close it and press <strong>Analyze</strong> again to include it.</li>
+      <li><strong>Recommended</strong> resets the selection to caches and temporary files only. Cookies and history are never ticked for you.</li>
+    </ul>
+    <p>Press <strong>Clean</strong> when you're ready. These files are deleted rather than recycled, because programs rebuild them anyway, and the confirmation says so.</p>
+
+    <h2 id="tidy" class="step-title"><span class="n">9</span>Keep it tidy</h2>
+    <p>You're done with the big cleanup. A few things help keep it that way:</p>
+    <ul>
+      <li><strong>Scan again in a few weeks.</strong> Heft saves a small snapshot after every scan, and the Changes tab shows which folders grew since. See <a href="guides/disk-usage.html#changes">Changes over time</a>.</li>
+      <li><strong>Turn on free space alerts</strong> in the View menu to get a notification when a drive is nearly full. See <a href="guides/alerts.html">Free space alerts</a>.</li>
+      <li><strong>Schedule the Cleaner</strong> on Windows to run every Sunday. See <a href="guides/cleaner.html#weekly">Weekly cleaning</a>.</li>
+      <li><strong>Save space without deleting</strong> by replacing duplicates with links or compressing games you rarely update. See <a href="guides/duplicates.html">Duplicates and saving space</a>.</li>
+    </ul>
+
+    <div class="pager">
+      <a href="index.html"><small>Back to</small>Home</a>
+      <a class="next" href="guides/disk-usage.html"><small>Next</small>Finding what uses space</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

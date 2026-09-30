@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command line · Heft</title>
+  <meta name="description" content="Heft's command-line options: export scans to CSV or JSON, run the Cleaner from a script, render treemap images, benchmark scans and read hardware sensors.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html" aria-current="page">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Command line</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">Everything you need to use Heft from scripts and scheduled tasks: exports, cleaning, treemap images, benchmarks and sensors.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#reference">Reference</a></li>
+        <li><a href="#export">Exporting a scan</a></li>
+        <li><a href="#clean">Running the Cleaner</a></li>
+        <li><a href="#schedule">Scheduling it on macOS and Linux</a></li>
+        <li><a href="#render">Treemap images</a></li>
+        <li><a href="#bench">Benchmarks and sensors</a></li>
+      </ul>
+    </nav>
+
+    <div class="note">
+      <p><strong>On Windows,</strong> <code>heft.exe</code> is a windowed program, so a terminal may not show what it prints. Add <code>--out report.txt</code> to save the output to a file, or pipe it, for example <code>heft.exe --bench C:\ | more</code>. The examples below use <code>heft</code>; on Windows use the full path to <code>heft.exe</code> if it isn't on your PATH.</p>
+    </div>
+
+    <h2 id="reference">Reference</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>heft [path]</code></td><td>Open Heft, and start scanning <code>path</code> if given.</td></tr>
+          <tr><td><code>heft --export &lt;path&gt; &lt;out.csv|out.json&gt; [--folders]</code></td><td>Scan <code>path</code> and write every item as CSV (folders only with <code>--folders</code>), or a JSON summary if the file ends in <code>.json</code>.</td></tr>
+          <tr><td><code>heft --clean [--dry-run]</code></td><td>Run the Cleaner with the selection saved in the app. <code>--dry-run</code> only reports what would go.</td></tr>
+          <tr><td><code>heft --render &lt;path&gt; &lt;out.png&gt; [--size WxH] [--mode type|category|age]</code></td><td>Scan <code>path</code> and save a treemap image. The default size is 1600x1000.</td></tr>
+          <tr><td><code>heft --bench &lt;path&gt; [--json]</code></td><td>Scan and print a summary with timings, the largest folders and the largest file types, or JSON.</td></tr>
+          <tr><td><code>heft --sensors [--rounds N]</code></td><td>Read every hardware sensor N times (default 3) and print the values with their minimum and maximum. Windows and Linux.</td></tr>
+          <tr><td><code>heft --tray</code></td><td>Start hidden in the notification area. Windows.</td></tr>
+          <tr><td><code>heft --compare &lt;path&gt;</code></td><td>Scan with both the MFT scanner and the folder scanner and compare the results. Windows, as administrator.</td></tr>
+          <tr><td><code>heft --check-refresh &lt;drive&gt;</code></td><td>Test change journal rescans against a full scan. Windows, as administrator.</td></tr>
+          <tr><td><code>heft --icon &lt;out.png&gt; [--size N]</code></td><td>Write the app icon. Used by the packaging scripts.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two options work with most commands:</p>
+    <ul>
+      <li><code>--out &lt;file&gt;</code> saves the printed report to a file as well.</li>
+      <li><code>--walk</code> makes <code>--bench</code>, <code>--export</code> and <code>--render</code> use the folder scanner even when the fast MFT scan is available.</li>
+    </ul>
+    <p>Set <code>HEFT_DEMO=1</code> to open the app on a made-up demo disk without scanning anything.</p>
+
+    <h2 id="export">Exporting a scan</h2>
+    <p>Every file and folder under a path, for a spreadsheet:</p>
+    <pre><code>heft --export C:\Users\alex everything.csv</code></pre>
+    <p>Just the folders, which is much shorter:</p>
+    <pre><code>heft --export /home/alex folders.csv --folders</code></pre>
+    <p>A JSON summary with totals, the drive's free space, the items directly inside, the largest files and space by type, handy for monitoring scripts:</p>
+    <pre><code>heft --export / summary.json</code></pre>
+    <p>For a quick machine-readable scan summary without writing a file, use <code>heft --bench &lt;path&gt; --json</code>.</p>
+
+    <h2 id="clean">Running the Cleaner</h2>
+    <p><code>heft --clean</code> runs the Cleaner with whatever you last ticked on the Cleaner page. Try it first with <code>--dry-run</code> to see what would be removed:</p>
+    <pre><code>heft --clean --dry-run</code></pre>
+    <p>The same safety rules apply as in the app: files in use are skipped, and so are rules whose program is running or that need administrator rights you don't have. On Windows, the Cleaner page can <a href="cleaner.html#weekly">schedule this every Sunday</a> for you.</p>
+
+    <h2 id="schedule">Scheduling it on macOS and Linux</h2>
+    <p>Use your system's scheduler. For example, to clean every Sunday at noon with cron, run <code>crontab -e</code> and add:</p>
+    <pre><code>0 12 * * 0 /path/to/heft --clean --out /tmp/heft-clean.txt</code></pre>
+    <p>Rules that run system tools through <code>pkexec</code> (the Linux package and journal caches) ask for your password, so they can't run unattended. Leave them unticked if you schedule cleaning.</p>
+
+    <h2 id="render">Treemap images</h2>
+    <p>Save a picture of a folder's treemap, for a report or just to compare over time:</p>
+    <pre><code>heft --render C:\ drive.png --size 2400x1500 --mode age</code></pre>
+    <p><code>--mode</code> picks the colors: <code>type</code> (the default), <code>category</code> or <code>age</code>.</p>
+
+    <h2 id="bench">Benchmarks and sensors</h2>
+    <p><code>--bench</code> scans a path and prints how long each phase took, along with the totals and the biggest folders and types. It's useful for comparing the fast scan with a folder scan:</p>
+    <pre><code>heft --bench C:\ --out fast.txt
+heft --bench C:\ --walk --out walk.txt</code></pre>
+    <p><code>--sensors</code> reads every hardware sensor a few times and prints them, with the driver status at the top:</p>
+    <pre><code>heft --sensors --rounds 5</code></pre>
+
+    <div class="pager">
+      <a href="alerts.html"><small>Previous</small>Free space alerts</a>
+      <a class="next" href="../faq.html"><small>Next</small>FAQ and troubleshooting</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

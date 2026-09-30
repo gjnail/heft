@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Free space alerts · Heft</title>
+  <meta name="description" content="Get a warning from Heft before a drive fills up, and keep it watching from the Windows notification area.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html" aria-current="page">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Free space alerts</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">Heft can warn you when a drive is getting full, before programs start failing to save.</p>
+
+    <h2 id="setting-up">Setting the limit</h2>
+    <p>Alerts are on by default, and a drive counts as almost full when it has less than 10 GB free. To change that, scan something so the toolbar shows the <strong>View</strong> menu, then under <strong>Free space alerts</strong>:</p>
+    <ul>
+      <li>untick <strong>Warn when a drive has less than</strong> to turn alerts off, or</li>
+      <li>pick 5, 10, 20 or 50 GB.</li>
+    </ul>
+    <p>For small drives, the limit is a tenth of the drive if that's less, so a 32 GB USB stick with 4 GB free doesn't set it off.</p>
+
+    <h2 id="what-happens">What happens when a drive gets full</h2>
+    <p>While Heft is running it checks your drives once a minute. When one drops below the limit:</p>
+    <ul>
+      <li>a warning appears at the top of the window with the drive's free space, and a button to <strong>See suggestions</strong> (if it's the drive you scanned) or <strong>Scan it</strong>;</li>
+      <li>you get one desktop notification for that drive. You won't get another until it has recovered and filled up again.</li>
+    </ul>
+    <p>Press <strong>Dismiss</strong> to hide the warning in the window.</p>
+    <p>Notifications use the notification area on Windows, Notification Center on macOS, and <code>notify-send</code> on Linux. If nothing appears on Linux, install your distribution's <code>libnotify</code> package, which provides <code>notify-send</code>.</p>
+
+    <h2 id="background">Keeping watch in the background (Windows)</h2>
+    <p>Two more options in the same menu let Heft keep an eye on your drives when you're not using it:</p>
+    <ul>
+      <li><strong>Keep watching in the notification area after closing.</strong> Closing the window hides Heft next to the clock instead of quitting. Click the icon to bring the window back, or right-click it to quit.</li>
+      <li><strong>Start with Windows, in the notification area.</strong> Heft starts hidden when you sign in and only speaks up when a drive is almost full. This adds a <code>Heft</code> value under <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>; untick it to remove it.</li>
+    </ul>
+    <p>To start Heft hidden yourself, for example from a shortcut, run <code>heft.exe --tray</code>.</p>
+
+    <div class="pager">
+      <a href="windows-tools.html"><small>Previous</small>Startup, programs and registry</a>
+      <a class="next" href="command-line.html"><small>Next</small>Command line</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

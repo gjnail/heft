@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Cleaner · Heft</title>
+  <meta name="description" content="How Heft's Cleaner removes caches and temporary files safely on Windows, macOS and Linux, including weekly cleaning and compacting WSL and Docker disks.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html" aria-current="page">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>The Cleaner</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">The Cleaner removes caches, temporary files and logs that programs recreate when they need them. It only looks in places it knows, and shows you every file before it removes anything.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#using">Using the Cleaner</a></li>
+        <li><a href="#covered">What it covers</a></li>
+        <li><a href="#rules">How it stays safe</a></li>
+        <li><a href="#system-tools">System caches on Linux</a></li>
+        <li><a href="#weekly">Weekly cleaning (Windows)</a></li>
+        <li><a href="#wsl">WSL and Docker disks (Windows)</a></li>
+        <li><a href="#windows-tools">Windows' own tools</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="using">Using the Cleaner</h2>
+    <figure class="shot">
+      <a href="../images/cleaner.webp"><img src="../images/cleaner.webp" width="1360" height="860" loading="lazy" alt="The Cleaner page with the list of rules on the left and the results sorted by size on the right"></a>
+      <figcaption>What to clean on the left, what it would free on the right. Programs that are running are marked and skipped.</figcaption>
+    </figure>
+    <ol>
+      <li>Open the <strong>Cleaner</strong> page. Heft analyzes right away; this only reads, and takes a few seconds.</li>
+      <li>Look over <strong>What to clean</strong> on the left. Each item shows how much it would free. <strong>Recommended</strong> ticks Heft's defaults (caches and temporary files only), and <strong>None</strong> clears everything.</li>
+      <li>Click a row in the results to see exactly which files would be removed. Double-click a file to show it in Explorer. <strong>Back to all results</strong> returns to the list.</li>
+      <li>Press <strong>Clean</strong> and confirm.</li>
+    </ol>
+    <p>Some items are marked in the list:</p>
+    <ul>
+      <li><strong>⏸ Close the program first.</strong> Heft skips a program's caches while it's running, so it never pulls files out from under it. Close it and press <strong>Analyze</strong> again.</li>
+      <li><strong>🛡 Needs administrator rights.</strong> System-wide locations such as Windows Update downloads and memory dumps need <strong>Restart as administrator</strong>.</li>
+      <li><strong>⚠ Has a side effect.</strong> Hover to see it. Cookies sign you out of every website, emptying the Recycle Bin is permanent, and developer caches download again on the next build. Apart from memory dumps, which only matter if you're troubleshooting crashes, none of these are ticked by default.</li>
+    </ul>
+    <p>Your selection is remembered for next time. Programs that aren't installed are hidden, so the list only shows what's on your computer.</p>
+    <div class="note">
+      <p>Cleaned files are deleted rather than moved to the Recycle Bin, because programs recreate them anyway and recycling caches would just move the clutter. The confirmation dialog says so.</p>
+    </div>
+
+    <h2 id="covered">What it covers</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Group</th><th>Examples</th></tr></thead>
+        <tbody>
+          <tr><td>System</td><td>Temporary files, the Recycle Bin or Trash, thumbnail and shader caches, error reports and crash dumps, old logs. On Windows also Windows Update and Delivery Optimization downloads, setup logs and NVIDIA driver downloads.</td></tr>
+          <tr><td>Browsers</td><td>Chrome, Edge, Firefox, Brave, Vivaldi, Opera and Chromium, plus Opera GX on Windows and Safari on macOS. The cache is ticked by default. On Windows, cookies, history, form history and the last session are there too, each with a note on what you'd lose.</td></tr>
+          <tr><td>Applications</td><td>Discord, Slack, Teams, Spotify, Visual Studio Code, Cursor, Steam, Epic Games Launcher, JetBrains IDEs, Adobe and Java.</td></tr>
+          <tr><td>Developer tools</td><td>Package and build caches for npm, Yarn, Bun, pip, Cargo, Go, Gradle, NuGet, Deno, Composer and Electron. On macOS also Homebrew, Xcode (DerivedData, simulator caches, simulators for runtimes you no longer have, device support files) and CocoaPods.</td></tr>
+          <tr><td>Privacy (Windows)</td><td>Recent items, Run dialog and Explorer address bar history, the clipboard and the DNS cache. None are ticked by default.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Heft has no rules for saved passwords, and none for the Windows Prefetch folder: clearing Prefetch makes programs start more slowly, not faster.</p>
+
+    <h2 id="rules">How it stays safe</h2>
+    <ul class="checks">
+      <li>Every rule names exact locations. There's no searching the disk for anything that looks like <code>*.tmp</code>.</li>
+      <li>A rule is skipped, not guessed, if its location can't be found or would point at a top-level user or system folder.</li>
+      <li>Links and junctions are never followed, so a cache folder can't lead Heft somewhere else.</li>
+      <li>Files that are in use are skipped, never forced.</li>
+      <li>Cleaning removes the files the analysis found, not whatever turns up in the folder later.</li>
+    </ul>
+
+    <h2 id="system-tools">System caches on Linux</h2>
+    <p>On Linux, some caches belong to the system, and the right way to clear them is the tool that owns them. Heft runs those tools instead of deleting files itself:</p>
+    <ul>
+      <li><code>apt-get clean</code> and <code>dnf clean packages</code> for package caches;</li>
+      <li><code>journalctl --vacuum-time=2weeks</code> for old system logs;</li>
+      <li>removing old, disabled snap revisions;</li>
+      <li><code>flatpak uninstall --unused</code> for runtimes no app needs.</li>
+    </ul>
+    <p>Heft shows the estimated saving first. Commands that need root go through <code>pkexec</code>, which asks for your password with your desktop's own prompt. On macOS, the Xcode simulator cleanup runs <code>xcrun simctl delete unavailable</code> in the same spirit.</p>
+
+    <h2 id="weekly">Weekly cleaning (Windows)</h2>
+    <p>At the bottom of the Cleaner page, tick <strong>Clean the selected items every Sunday</strong>. Heft adds a Windows scheduled task called <code>Heft\Weekly clean</code> that runs <code>heft --clean</code> with your current selection. If you set it up while running as administrator, the task runs elevated too, so administrator-only items are included.</p>
+    <p>Untick the box to remove the task. On macOS and Linux, you can schedule <code>heft --clean</code> yourself; see <a href="command-line.html#schedule">Command line</a>.</p>
+
+    <h2 id="wsl">WSL and Docker disks (Windows)</h2>
+    <p>WSL 2 distros and Docker Desktop keep Linux's files in a virtual disk (<code>.vhdx</code>) that grows as Linux writes data but never shrinks when the data is deleted. The <strong>WSL and Docker disks</strong> section finds them and shows their size.</p>
+    <ol>
+      <li>Tick the disks to compact and press <strong>Compact</strong>.</li>
+      <li>Heft can first run <code>fstrim</code> inside each WSL distro, so the disk knows which space Linux has freed.</li>
+      <li>It shuts WSL down with <code>wsl --shutdown</code>, then compacts every disk with diskpart in one go. Windows asks for administrator permission once.</li>
+    </ol>
+    <p>Large disks can take minutes. When it's done Heft shows each disk's size before and after. Disks already set to sparse shrink by themselves and can't be ticked.</p>
+
+    <h2 id="windows-tools">Windows' own tools</h2>
+    <p>Some cleanup belongs to Windows. The Cleaner page has shortcuts to:</p>
+    <ul>
+      <li><strong>Storage Sense</strong>, Windows' automatic cleanup settings;</li>
+      <li><strong>Disk Cleanup</strong>, which can remove a previous Windows installation (<code>Windows.old</code>);</li>
+      <li><strong>Component store cleanup</strong>, which runs DISM as administrator to remove superseded Windows updates from WinSxS. It opens a console window and can take a while.</li>
+    </ul>
+
+    <div class="pager">
+      <a href="duplicates.html"><small>Previous</small>Duplicates and saving space</a>
+      <a class="next" href="hardware.html"><small>Next</small>Hardware monitor</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

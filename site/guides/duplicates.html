@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Duplicates and saving space · Heft</title>
+  <meta name="description" content="Find duplicate files with Heft, replace copies with hard links or clones, compress folders on NTFS, and move folders to another drive.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html" aria-current="page">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Duplicates and saving space</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">Find duplicate files, and win back space without deleting anything: replace copies with links, compress folders, or move a folder to a bigger drive.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#finding">Finding duplicates</a></li>
+        <li><a href="#links">Replacing copies with links or clones</a></li>
+        <li><a href="#compress">Compressing a folder (Windows)</a></li>
+        <li><a href="#move">Moving a folder to another drive</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="finding">Finding duplicates</h2>
+    <ol>
+      <li>Scan a drive or folder, then open the <strong>Duplicates</strong> tab.</li>
+      <li>Choose a minimum size under <strong>Files of at least</strong>. Small files rarely matter and take the longest to compare.</li>
+      <li>Press <strong>Find duplicates</strong>.</li>
+    </ol>
+    <p>Heft compares files in three rounds: first by size, then by a sample of their content, and only then by reading them in full. Files that differ are ruled out early, so most of the drive is never read. Hard links aren't reported, because they're already one file with two names, and online-only cloud files are skipped so nothing gets downloaded.</p>
+    <p>Results come in groups of identical files, largest first. <strong>Select all but the oldest</strong> ticks every copy except the oldest in each group. Then either:</p>
+    <ul>
+      <li><strong>Recycle</strong> the selected copies, or</li>
+      <li><strong>Replace with links</strong> (or clones), so every copy stays where it is but the data is stored once. Read on.</li>
+    </ul>
+
+    <h2 id="links">Replacing copies with links or clones</h2>
+    <p>Sometimes you want a file in two places: the same photo in two albums, the same installer in two project folders. Instead of deleting one, Heft can make both names share the same storage. Select the extra copies on the Duplicates tab and choose <strong>Replace with links</strong> or <strong>Replace with clones</strong>; the button says which one your drive supports.</p>
+    <p>Heft compares every byte again right before replacing a file, then swaps the copy for one of these:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Clone</th><th>Hard link</th></tr></thead>
+        <tbody>
+          <tr><td>Used on</td><td>ReFS and Windows Dev Drives, APFS (Mac), Btrfs and XFS (Linux)</td><td>NTFS (Windows), ext4 and other Linux file systems</td></tr>
+          <tr><td>What it is</td><td>Two separate files that share space until one of them changes</td><td>One file with two names</td></tr>
+          <tr><td>If you edit one copy</td><td>Only that copy changes</td><td>Both change, because they're the same file</td></tr>
+          <tr><td>Good for</td><td>Anything</td><td>Files you don't edit: photos, music, videos, installers, archives</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warn">
+      <p><strong>Hard links and documents don't mix.</strong> With hard links, changing one copy changes all of them. Heft asks you to tick "I understand that changing one copy will change all of them" before it makes any.</p>
+    </div>
+    <p>With clones, scans still show both files at full size, since each is a complete file. The drive's free space shows the difference. Files in system and program folders are always left alone.</p>
+
+    <h2 id="compress">Compressing a folder (Windows)</h2>
+    <figure class="shot">
+      <a href="../images/compress.webp"><img src="../images/compress.webp" width="1360" height="860" loading="lazy" alt="The Compress dialog for a game folder, offering Faster to open or Smaller, slower to open"></a>
+      <figcaption>Compressing a game you rarely update. It stays installed and works as before.</figcaption>
+    </figure>
+    <p>On NTFS drives, Windows can keep files compressed and unpack them as they're read, the same way <code>compact /EXE</code> does. The files stay where they are and open as usual, if a little slower on an old computer.</p>
+    <ol>
+      <li>Right-click a folder and choose <strong>Compress</strong>.</li>
+      <li>Pick <strong>Faster to open</strong> (XPRESS) or <strong>Smaller, slower to open</strong> (LZX).</li>
+      <li>Press <strong>Compress</strong>. Heft reports how much space it saved when it's done.</li>
+    </ol>
+    <p>When a program later changes one of the files, that file is stored uncompressed again. So this suits programs and games you don't update often, and old projects. Photos, video, music and archives are already compressed and are skipped. The Suggestions tab lists programs and games that haven't changed in three months.</p>
+    <p>Files a running program has open are skipped. <strong>Uncompress</strong> in the same dialog undoes it, as long as the drive has room for the files at full size. Heft won't compress Windows itself; for that, run <code>compact /CompactOS:always</code> as administrator.</p>
+
+    <h2 id="move">Moving a folder to another drive</h2>
+    <p>Running out of room on a small system drive? Move a big folder to another drive and leave a link behind, so programs that use the old location still find it.</p>
+    <ol>
+      <li>Right-click a folder and choose <strong>Move to another drive</strong>.</li>
+      <li>Pick a drive under <strong>Move it to</strong>, or <strong>Choose a folder</strong>. Drives without enough free space are marked.</li>
+      <li>Heft copies the folder, checks every file against the original, and only then puts a link in its place: a junction on Windows, a symbolic link on macOS and Linux.</li>
+    </ol>
+    <p>The original goes to the Recycle Bin or Trash; empty it to get the space back. Keep the other drive connected, since anything that uses the folder fails while it's missing.</p>
+    <p>Heft won't move system folders, the folder you scanned, folders that are already links or contain links, or folders with online-only files (copying them would download them). To undo a move, delete the link and move the folder back.</p>
+
+    <div class="pager">
+      <a href="cleaning-up.html"><small>Previous</small>Cleaning up safely</a>
+      <a class="next" href="cleaner.html"><small>Next</small>The Cleaner</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

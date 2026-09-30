@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finding what uses space · Heft</title>
+  <meta name="description" content="How to scan a drive with Heft and read the treemap, folder tree, file types, search and changes over time.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html" aria-current="page">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Finding what uses space</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">The Disk usage page shows every file on a drive, so you can see at a glance where the space went.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#scanning">Scanning</a></li>
+        <li><a href="#treemap">The treemap</a></li>
+        <li><a href="#folders">Folders</a></li>
+        <li><a href="#types">File types</a></li>
+        <li><a href="#search">Search</a></li>
+        <li><a href="#changes">Changes over time</a></li>
+        <li><a href="#export">Export</a></li>
+        <li><a href="#accuracy">How sizes are counted</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="scanning">Scanning</h2>
+    <p>Pick a drive or your home folder on the start screen, choose any folder with <strong>Scan a folder</strong>, or drop a folder onto the window. Later, use <strong>Scan drive</strong>, <strong>Scan folder</strong> and <strong>Rescan</strong> in the toolbar.</p>
+    <p>Heft has two ways to scan:</p>
+    <ul>
+      <li><strong>Fast scan (Windows, NTFS, administrator).</strong> Heft reads the drive's master file table directly instead of opening every folder. A 1.5 TB drive with 2.7 million files takes about 6 seconds. Leave <strong>Fast scan</strong> ticked in the toolbar and use <strong>Restart as administrator</strong> to get it.</li>
+      <li><strong>Folder scan (everywhere else).</strong> Heft lists folders on many threads at once. It works without special rights on every system, just more slowly.</li>
+    </ul>
+    <p>After a fast scan, <strong>Rescan</strong> doesn't start from scratch: it reads the NTFS change journal and updates only what changed. Tick <strong>View &gt; Update automatically</strong> and Heft keeps the map current every few seconds while it's open.</p>
+
+    <h2 id="treemap">The treemap</h2>
+    <figure class="shot">
+      <a href="../images/overview.webp"><img src="../images/overview.webp" width="1360" height="860" loading="lazy" alt="A treemap colored by file type, with folder names on the largest blocks"></a>
+      <figcaption>Colored by file type. Each color is one extension, so a big block of one color is a lot of one kind of file.</figcaption>
+    </figure>
+    <p>Every file is a rectangle sized by the space it uses. Files in the same folder sit together, and the shading makes each folder look like a raised cushion, so you can tell folders apart without borders.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>To</th><th>Do this</th></tr></thead>
+        <tbody>
+          <tr><td>Select a file or folder</td><td>Click it. The folder tree scrolls to it.</td></tr>
+          <tr><td>See its path and size</td><td>Hover over it.</td></tr>
+          <tr><td>Zoom into a folder</td><td>Double-click, or press <kbd>Enter</kbd>.</td></tr>
+          <tr><td>Zoom out</td><td><kbd>Backspace</kbd>, the mouse back button, or the up arrow button above the map.</td></tr>
+          <tr><td>Move between rectangles</td><td>Arrow keys, with the treemap focused.</td></tr>
+          <tr><td>Clear a highlight</td><td><kbd>Esc</kbd>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Color by</strong> in the toolbar changes what the colors mean:</p>
+    <ul>
+      <li><strong>File type:</strong> one color per extension.</li>
+      <li><strong>Category:</strong> video, images, audio, archives, documents, code, programs, game data and system files.</li>
+      <li><strong>Age:</strong> when each file last changed, from today (warm) to ten years ago (cool). Good for finding forgotten folders.</li>
+      <li><strong>Growth:</strong> what grew since an earlier scan. It becomes available after you compare scans on the <a href="#changes">Changes</a> tab.</li>
+    </ul>
+    <p>The <strong>View</strong> menu has two more options. <strong>Size rectangles by</strong> switches between file size and space on disk; compressed, sparse and online-only files take less room than their size suggests. <strong>Show names on large rectangles</strong> turns the labels on or off.</p>
+    <p>Right-click anything, in the map or the tree, for <strong>Zoom into folder</strong>, <strong>Show in Explorer</strong> (Finder on a Mac), <strong>Open</strong>, <strong>Copy path</strong>, <strong>Highlight</strong> all files of that type, <strong>Compress</strong>, <strong>Move to another drive</strong> and <strong>Move to Recycle Bin</strong>.</p>
+
+    <h2 id="folders">Folders</h2>
+    <p>The <strong>Folders</strong> tab is the classic view: a tree with each folder's size, its share of the folder above it, how many files it holds and when anything inside last changed. Biggest folders come first.</p>
+    <p>A warning triangle next to a folder means deleting it could cause trouble. Hover over the triangle for the reason, or read <a href="cleaning-up.html#warnings">what the warnings mean</a>.</p>
+    <p>Keyboard: <kbd>Up</kbd> and <kbd>Down</kbd> move through the tree, <kbd>Right</kbd> and <kbd>Left</kbd> expand and collapse.</p>
+
+    <h2 id="types">File types</h2>
+    <figure class="shot">
+      <a href="../images/types.webp"><img src="../images/types.webp" width="1360" height="860" loading="lazy" alt="The File types tab listing categories and extensions with their share of the drive"></a>
+      <figcaption>Space by category and by extension. Clicking a row lights those files up in the treemap.</figcaption>
+    </figure>
+    <p>The <strong>File types</strong> tab adds up space by category (games, video, programs and so on) and by extension. Click a row to highlight every matching file in the treemap; press <kbd>Esc</kbd> to clear it.</p>
+
+    <h2 id="search">Search</h2>
+    <figure class="shot">
+      <a href="../images/age.webp"><img src="../images/age.webp" width="1360" height="860" loading="lazy" alt="The Search tab listing the largest files, with the treemap colored by age"></a>
+      <figcaption>With no search text, Search lists the largest files. Here the treemap is colored by age.</figcaption>
+    </figure>
+    <p>The <strong>Search</strong> tab searches the whole scan instantly, without touching the disk again. With no search text it lists the largest files.</p>
+    <ul>
+      <li><strong>Text:</strong> part of a name (<code>invoice</code>), an extension (<code>.iso</code> or <code>*.iso</code>), or a pattern with <code>*</code> and <code>?</code> (<code>IMG_????.jpg</code>, <code>backup*</code>). Case doesn't matter.</li>
+      <li><strong>Files, folders, or both.</strong></li>
+      <li><strong>At least</strong> 1 MB, 10 MB, 100 MB, 1 GB or 10 GB.</li>
+      <li><strong>Modified</strong> in the last week, month or year, or over 6 months, a year or 2 years ago.</li>
+    </ul>
+    <p>Search looks inside the folder shown in the treemap, so zoom in first to search one part of the drive. Everything that matches can go to the Recycle Bin or Trash in one step, with the usual confirmation.</p>
+
+    <h2 id="changes">Changes over time</h2>
+    <p>Heft saves a small snapshot after each scan: every folder, plus files over 16 MB. Scan the same drive again a few days or weeks later and the <strong>Changes</strong> tab can compare the two.</p>
+    <ol>
+      <li>Open the <strong>Changes</strong> tab.</li>
+      <li>Pick an earlier scan under <strong>Compare with</strong> and press <strong>Compare</strong>.</li>
+      <li>Heft lists the folders that grew or shrank the most. Choose <strong>Color by &gt; Growth</strong> to see the same thing on the map.</li>
+    </ol>
+    <p>The <strong>Size over time</strong> chart shows how the folder shown in the treemap changed across every saved scan. Zoom into a folder to chart just that folder.</p>
+
+    <h2 id="export">Export</h2>
+    <p>The <strong>Export</strong> menu saves the folder shown in the treemap as:</p>
+    <ul>
+      <li><strong>Every file and folder (CSV)</strong>, one row per item, for a spreadsheet;</li>
+      <li><strong>Folders only (CSV)</strong>, which is much shorter;</li>
+      <li><strong>Summary (JSON)</strong>, with totals, the drive's free space, what's directly inside the folder, the largest files and space by type.</li>
+    </ul>
+    <p>To export from a script instead, see <a href="command-line.html">Command line</a>.</p>
+
+    <h2 id="accuracy">How sizes are counted</h2>
+    <p>Heft goes out of its way to count space correctly, so its totals can differ from other tools:</p>
+    <ul>
+      <li><strong>Hard links are counted once.</strong> Windows keeps many system files under two names. A plain folder scan counts them twice; on one test drive that added 24 GB that didn't exist.</li>
+      <li><strong>Online-only files count as 0 bytes on disk.</strong> OneDrive, Dropbox and iCloud files that aren't downloaded take no space, and Heft never reads them, so scanning doesn't download anything.</li>
+      <li><strong>Folders reachable by two paths are counted once</strong> (bind mounts, macOS firmlinks), and virtual file systems such as <code>/proc</code> are skipped.</li>
+      <li><strong>The fast scan sees hidden system areas</strong> such as <code>System Volume Information</code>, where Windows keeps restore points, which a folder scan can't open.</li>
+    </ul>
+
+    <div class="pager">
+      <a href="../tutorial.html"><small>Previous</small>Tutorial</a>
+      <a class="next" href="cleaning-up.html"><small>Next</small>Cleaning up safely</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

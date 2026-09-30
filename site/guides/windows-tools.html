@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Startup, programs and registry · Heft</title>
+  <meta name="description" content="Use Heft on Windows to turn off startup programs, uninstall programs and clear their leftovers, update software through winget, and fix broken registry entries with backups.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html" aria-current="page">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Startup, programs and registry</h1>
+    <span class="platforms">Windows</span>
+    <p class="lede">Three maintenance pages for Windows: what starts when you sign in, what's installed, and registry entries that point at things that are gone.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#startup">Startup</a></li>
+        <li><a href="#programs">Programs</a></li>
+        <li><a href="#updates">Updating programs</a></li>
+        <li><a href="#registry">Registry</a></li>
+        <li><a href="#backups">Backups</a></li>
+      </ul>
+    </nav>
+    <p>Items that affect every user on the PC, scheduled tasks and <code>HKEY_LOCAL_MACHINE</code> need administrator rights. Each page says so and offers <strong>Restart as administrator</strong>.</p>
+
+    <h2 id="startup">Startup</h2>
+    <p>The <strong>Startup</strong> page lists everything that launches when you sign in: Run keys in the registry, Startup folders, and scheduled tasks that run at logon or boot. Each row shows the program, its publisher, the command it runs and where the entry lives. Use <strong>Filter</strong> to find one.</p>
+    <ul>
+      <li><strong>Turn an item off</strong> with its checkbox. This uses the same switch as Task Manager's Startup tab, so nothing is deleted and you can turn it back on any time.</li>
+      <li><strong>Remove an entry</strong> for good with the bin button. Startup-folder shortcuts go to the Recycle Bin, scheduled tasks are deleted, and registry entries are deleted after a <code>.reg</code> backup is saved.</li>
+    </ul>
+    <p>Run-once entries can only be removed, since Windows deletes them itself after they run.</p>
+
+    <h2 id="programs">Programs</h2>
+    <p>The <strong>Programs</strong> page lists everything installed with the space it really takes. Installers often report their size wrong or not at all, so Heft measures each install folder. A size with a <strong>~</strong> in front is the installer's own figure, used when there's no folder to measure. Search by name or publisher, and sort by size, name, install date or publisher.</p>
+    <p><strong>To uninstall a program:</strong></p>
+    <ol>
+      <li>Press <strong>Uninstall</strong>. The program's own uninstaller opens, and Heft waits for it to finish.</li>
+      <li>Heft then looks for folders it left behind and lists them.</li>
+      <li>Tick what to remove and press <strong>Move to the Recycle Bin</strong>, or <strong>Keep everything</strong>.</li>
+    </ol>
+    <p>Leftover suggestions are checked against the programs that are still installed. A folder is never suggested if it belongs to another program, is shared with one, or sits inside one, and a folder is never taken from a launcher's command line (such as a Steam game's uninstall link). Only the folder the installer itself recorded is ticked; folders that just share the program's name are listed unticked, so you can check them first.</p>
+    <p>The menu button on each row can open the install folder, <strong>Show in disk map</strong> (scan it on the Disk usage page), copy the uninstall command, or <strong>Remove from the list</strong>. That last one is for programs whose uninstaller no longer exists: Heft deletes the leftover registry entry after saving a <code>.reg</code> backup.</p>
+
+    <h2 id="updates">Updating programs</h2>
+    <p>Press <strong>Check for updates</strong> and Heft asks <a href="https://learn.microsoft.com/windows/package-manager/winget/">winget</a>, Windows' package manager, which programs have newer versions. Programs with an update get an <strong>Update</strong> button, and <strong>Update all</strong> updates everything at once after asking.</p>
+    <p>Installers run in a console window so you can see their prompts and license terms. This is the only time Heft uses the network.</p>
+
+    <h2 id="registry">Registry</h2>
+    <p>Registry "cleaning" doesn't make Windows faster, and aggressive registry cleaners break things. Heft's <strong>Registry</strong> page is housekeeping, and it's deliberately narrow. Press <strong>Scan for issues</strong> to look for entries that point to programs, files or folders that no longer exist:</p>
+    <ul>
+      <li>uninstall entries for removed programs;</li>
+      <li>startup entries for missing programs;</li>
+      <li>App Paths for missing programs (what Win+R uses to find them);</li>
+      <li>shared DLL counts for missing files;</li>
+      <li>installer folder references;</li>
+      <li>compatibility settings for missing programs;</li>
+      <li>cached names of missing programs.</li>
+    </ul>
+    <p>Only the first four are ticked, because they have a visible effect (Apps &amp; Features, startup, Win+R and uninstall bookkeeping). The rest are harmless clutter, listed for you to decide.</p>
+    <p>An entry only counts as broken when the file it names is provably gone. Network paths, missing drives and "access denied" are never treated as missing, and COM registrations and file associations are left alone entirely. Press <strong>Fix selected</strong> and Heft saves a backup, then removes the entries.</p>
+
+    <h2 id="backups">Backups</h2>
+    <p>Every registry change Heft makes, on the Registry, Startup and Programs pages, is saved first as a <code>.reg</code> file in <code>%LOCALAPPDATA%\Heft\backups</code>. The <strong>Backups</strong> list at the bottom of the Registry page shows them all. Press <strong>Restore</strong> next to one to write the saved entries back, or <strong>Open folder</strong> to see the files. Entries for all users need administrator rights to restore.</p>
+
+    <div class="pager">
+      <a href="hardware.html"><small>Previous</small>Hardware monitor</a>
+      <a class="next" href="alerts.html"><small>Next</small>Free space alerts</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

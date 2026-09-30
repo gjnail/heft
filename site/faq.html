@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ and troubleshooting · Heft</title>
+  <meta name="description" content="Answers about Heft: security warnings on first launch, administrator rights, why sizes differ from Explorer, safety, privacy, macOS and Linux, and uninstalling.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><img src="images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="tutorial.html">Tutorial</a>
+      <a href="guides/index.html">Guides</a>
+      <a href="faq.html" aria-current="page">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="tutorial.html">Tutorial</a></li>
+      <li><a href="faq.html" aria-current="page">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="guides/disk-usage.html">Finding what uses space</a></li>
+      <li><a href="guides/cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="guides/duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="guides/cleaner.html">The Cleaner</a></li>
+      <li><a href="guides/hardware.html">Hardware monitor</a></li>
+      <li><a href="guides/windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="guides/alerts.html">Free space alerts</a></li>
+      <li><a href="guides/command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose faq">
+    <h1>FAQ and troubleshooting</h1>
+    <p class="lede">Quick answers to common questions. Something missing? <a href="https://github.com/gjnail/heft/issues">Open an issue</a>.</p>
+
+    <h2 id="getting-started">Getting started</h2>
+
+    <details id="unsigned">
+      <summary>Windows says "Windows protected your PC". Is Heft safe to run?</summary>
+      <p>That warning appears for any program that isn't code-signed yet, and Heft's downloads aren't signed yet. Click <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+      <p>If Smart App Control is on, Windows blocks unsigned programs without offering that choice. Releases will be signed once SignPath Foundation approves the project for free open-source code signing.</p>
+      <p>You can check that a download really was built from Heft's source on GitHub: each release has a <code>SHA256SUMS.txt</code>, and GitHub keeps a signed build record. With the <a href="https://cli.github.com/">GitHub CLI</a>:</p>
+      <pre><code>gh attestation verify heft-&lt;version&gt;-windows-x86_64.zip --repo gjnail/heft</code></pre>
+    </details>
+
+    <details id="macos-warning">
+      <summary>macOS says it can't verify that Heft is free of malware.</summary>
+      <p>The Mac download isn't signed or notarized, which needs a paid Apple developer account. Open System Settings &gt; Privacy &amp; Security, scroll down, and click <strong>Open Anyway</strong>. You only need to do this once.</p>
+    </details>
+
+    <details id="install">
+      <summary>Do I need to install anything?</summary>
+      <p>No. Heft is a single program with no installer. Unzip it and run it. On Linux, <code>bash scripts/install-linux.sh</code> from the download adds it to your app launcher, without needing root.</p>
+    </details>
+
+    <details id="admin">
+      <summary>Why does Heft ask to restart as administrator? Do I have to?</summary>
+      <p>You don't have to. Everything works without it, and Heft only asks. Administrator rights let Heft:</p>
+      <ul>
+        <li>use the fast scan, which reads the NTFS master file table in seconds;</li>
+        <li>see folders a normal program can't open, such as <code>System Volume Information</code>;</li>
+        <li>clean system-wide locations such as Windows Update downloads and memory dumps;</li>
+        <li>change startup entries for all users, scheduled tasks and registry entries under <code>HKEY_LOCAL_MACHINE</code>;</li>
+        <li>read CPU temperatures and motherboard sensors through PawnIO.</li>
+      </ul>
+    </details>
+
+    <h2 id="sizes">Sizes and scanning</h2>
+
+    <details id="explorer-size">
+      <summary>Why does Heft show a different size than Explorer or another tool?</summary>
+      <p>Usually because Heft counts more carefully:</p>
+      <ul>
+        <li><strong>Hard links are counted once.</strong> Windows keeps many system files under two names; tools that count both can over-count by tens of gigabytes.</li>
+        <li><strong>Online-only cloud files count as 0 bytes on disk</strong>, because they aren't on the disk.</li>
+        <li><strong>Size and space on disk differ</strong> for compressed and sparse files. Switch with View &gt; Size rectangles by.</li>
+        <li><strong>A folder scan can't open everything.</strong> Without administrator rights, system folders and other users' folders are unreadable, so the total is lower than the drive's used space. Use the fast scan to see it all.</li>
+      </ul>
+    </details>
+
+    <details id="cloud">
+      <summary>Will scanning download my OneDrive, Dropbox or iCloud files?</summary>
+      <p>No. Online-only files are never opened or read, by the scan, the duplicate finder or anything else. Moving a folder that contains them is refused for the same reason.</p>
+    </details>
+
+    <details id="slow">
+      <summary>The scan is slow.</summary>
+      <p>On Windows, run Heft as administrator and leave <strong>Fast scan</strong> ticked; on an NTFS drive that's usually a few seconds even for millions of files. After that, <strong>Rescan</strong> only reads what changed. Network drives and drives that aren't NTFS always use the slower folder scan.</p>
+    </details>
+
+    <details id="macos-fda">
+      <summary>On macOS, some folders are missing from the scan.</summary>
+      <p>macOS protects folders such as Mail and the Trash. Give Heft <strong>Full Disk Access</strong> in System Settings &gt; Privacy &amp; Security to include them.</p>
+    </details>
+
+    <h2 id="safety">Safety</h2>
+
+    <details id="safe">
+      <summary>Could Heft delete something important?</summary>
+      <p>Heft is built to make that hard:</p>
+      <ul>
+        <li>Files go to the Recycle Bin or Trash, and the Removed tab can put them back.</li>
+        <li>System files, programs, app data and other risky locations are marked, and explained before you can delete them. Anything that could stop the computer from starting needs an extra confirmation.</li>
+        <li>Suggestions leave out anything risky, and only pre-select clearly disposable files.</li>
+        <li>The Cleaner only touches a fixed list of known cache locations, and shows the exact files first.</li>
+        <li>Every registry change is backed up first.</li>
+      </ul>
+      <p>If you ever think Heft could delete the wrong files, please report it privately as described in the project's <a href="https://github.com/gjnail/heft/blob/main/SECURITY.md">security policy</a>.</p>
+    </details>
+
+    <details id="undo-delete">
+      <summary>I deleted the wrong thing. Can I get it back?</summary>
+      <p>Yes, as long as the Recycle Bin or Trash hasn't been emptied. Open the <strong>Removed</strong> tab: on Windows and Linux select the items and press <strong>Put back</strong>; on macOS press <strong>Open the Trash</strong> and use Put Back in Finder. Files removed by the Cleaner are caches and are deleted directly, so they can't be restored, but the programs that use them recreate them.</p>
+    </details>
+
+    <details id="undo-registry">
+      <summary>How do I undo a registry fix?</summary>
+      <p>Open the <strong>Registry</strong> page and find the backup in the <strong>Backups</strong> list at the bottom, then press <strong>Restore</strong>. The backups are ordinary <code>.reg</code> files in <code>%LOCALAPPDATA%\Heft\backups</code>, so you can also double-click one to merge it back in.</p>
+    </details>
+
+    <details id="registry-speed">
+      <summary>Will fixing registry issues make my PC faster?</summary>
+      <p>No. No registry cleaner will, whatever it claims. Heft's Registry page is housekeeping: it removes entries that point to things that no longer exist, such as uninstall entries for programs that are gone. That tidies Apps &amp; Features and the startup list, nothing more.</p>
+    </details>
+
+    <details id="cookies">
+      <summary>Will the Cleaner sign me out of websites?</summary>
+      <p>Only if you tick a browser's <strong>Cookies</strong> item. Cookies, history, form history and last sessions are never ticked by default, and each says what you'd lose.</p>
+    </details>
+
+    <h2 id="hardware">Hardware monitor</h2>
+
+    <details id="cpu-temp">
+      <summary>The CPU temperature says "Needs administrator" or is missing.</summary>
+      <p>Windows only lets a kernel driver read the CPU's temperature. Install <a href="https://pawnio.eu">PawnIO</a> (<code>winget install namazso.PawnIO</code>), then use <strong>Restart as administrator</strong> on the Hardware page. See <a href="guides/hardware.html#pawnio">the Hardware guide</a>.</p>
+    </details>
+
+    <details id="fans">
+      <summary>My motherboard's fans and voltages don't show up.</summary>
+      <p>Heft reads the Nuvoton sensor chips (NCT679x and NCT6701D) found on most ASUS and ASRock boards, through PawnIO. Gigabyte boards (ITE chips) and MSI boards with the NCT6687D aren't supported yet. On Linux, fans appear when your kernel has a driver for the chip; check <code>sensors</code> from lm-sensors.</p>
+    </details>
+
+    <details id="mac-hardware">
+      <summary>Why is there no Hardware page on macOS?</summary>
+      <p>Heft doesn't have a way to read Mac sensors yet. Disk usage and the Cleaner work on macOS.</p>
+    </details>
+
+    <h2 id="privacy">Privacy</h2>
+
+    <details id="data">
+      <summary>Does Heft send any data anywhere?</summary>
+      <p>No. Heft has no accounts, analytics or crash reporting. The only time it uses the network is when you check for or install software updates on the Programs page, which runs winget. This website has no analytics or cookies either.</p>
+    </details>
+
+    <details id="stored">
+      <summary>What does Heft save on my computer?</summary>
+      <ul>
+        <li>Scan snapshots for the Changes tab, the list of items it moved to the Recycle Bin or Trash, and your Cleaner selection, in <code>%LOCALAPPDATA%\Heft</code> (Windows), <code>~/Library/Application Support/Heft</code> (macOS) or <code>~/.local/share/heft</code> (Linux).</li>
+        <li>Registry backups in <code>%LOCALAPPDATA%\Heft\backups</code> (Windows).</li>
+        <li>The window size and a few view settings, in <code>%APPDATA%\heft</code> (Windows), <code>~/Library/Application Support/heft</code> (macOS) or <code>~/.local/share/heft</code> (Linux).</li>
+      </ul>
+      <p>Snapshots record folder sizes and the names of files over 16 MB, not file contents.</p>
+    </details>
+
+    <h2 id="other">Everything else</h2>
+
+    <details id="uninstall">
+      <summary>How do I uninstall Heft?</summary>
+      <p>If you turned on Start with Windows (View menu) or weekly cleaning (Cleaner page), turn them off first. Then delete the program and its data folders:</p>
+      <ul>
+        <li><strong>Windows:</strong> <code>heft.exe</code>, <code>%LOCALAPPDATA%\Heft</code> and <code>%APPDATA%\heft</code>. Keep a copy of <code>%LOCALAPPDATA%\Heft\backups</code> if you might want to undo a registry fix later.</li>
+        <li><strong>macOS:</strong> move Heft to the Trash and delete <code>~/Library/Application Support/Heft</code>.</li>
+        <li><strong>Linux:</strong> delete the <code>heft</code> program and <code>~/.local/share/heft</code>. If you used <code>install-linux.sh</code>, the top of that script lists the files it added.</li>
+      </ul>
+    </details>
+
+    <details id="cost">
+      <summary>Is Heft really free?</summary>
+      <p>Yes, and open source under the MIT license, with no paid version, ads or nagging. If it saved you some space and you'd like to say thanks, you can <a href="https://ko-fi.com/gnail">buy the author a coffee on Ko-fi</a>.</p>
+    </details>
+
+    <details id="bugs">
+      <summary>How do I report a bug or ask for a feature?</summary>
+      <p><a href="https://github.com/gjnail/heft/issues">Open an issue on GitHub</a>. Reports from macOS and Linux are especially welcome, since those builds haven't been tried on much real hardware yet. Pull requests are welcome too; see the <a href="https://github.com/gjnail/heft/blob/main/CONTRIBUTING.md">contributing guide</a>.</p>
+    </details>
+
+    <div class="pager">
+      <a href="guides/command-line.html"><small>Previous</small>Command line</a>
+      <a class="next" href="tutorial.html"><small>Back to</small>Tutorial</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

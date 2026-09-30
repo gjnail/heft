@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heft: disk usage analyzer and PC cleaner</title>
+  <meta name="description" content="Heft is a free, open-source disk usage analyzer and PC cleaner. See where your space went, find what you don't need, and remove it without surprises.">
+  <meta property="og:title" content="Heft: disk usage analyzer and PC cleaner">
+  <meta property="og:description" content="See where your disk space went, and get it back safely. Free and open source.">
+  <meta property="og:image" content="https://gjnail.github.io/heft/images/overview.webp">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><img src="images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="tutorial.html">Tutorial</a>
+      <a href="guides/index.html">Guides</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="blocks" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span><span class="b4"></span><span class="b5"></span></div>
+    <h1>See where your disk space went, and get it back safely</h1>
+    <p class="lede">Heft is a free, open-source disk usage analyzer and PC cleaner. It maps every file on your drive, points out what you probably don't need, and explains everything before it removes anything.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/gjnail/heft/releases/latest">Download Heft 1.0</a>
+      <a class="btn btn-secondary" href="tutorial.html">Start the tutorial</a>
+    </div>
+    <p class="hero-meta">Windows 10 and 11 · macOS and Linux builds in testing · MIT license · No accounts, no tracking</p>
+  </section>
+
+  <div class="hero-shot">
+    <figure class="shot">
+      <img src="images/overview.webp" width="1360" height="860" alt="Heft showing a folder tree on the left and a colorful treemap of the whole drive on the right">
+      <figcaption>Every file on the drive is a rectangle sized by the space it uses. The screenshot uses Heft's made-up demo disk.</figcaption>
+    </figure>
+  </div>
+
+  <section class="section">
+    <h2>Everything in one place</h2>
+    <p class="sub">A disk map, cleanup suggestions, a junk cleaner and a hardware monitor, in one small program with no installer.</p>
+    <div class="cards">
+      <a class="card" href="guides/disk-usage.html">
+        <img src="images/overview.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · macOS · Linux</span>
+          <h3>Treemap and folder tree</h3>
+          <p>Spot the biggest folders at a glance. Zoom in, color by type or age, and see what grew since your last scan.</p>
+        </div>
+      </a>
+      <a class="card" href="guides/cleaning-up.html">
+        <img src="images/suggestions.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · macOS · Linux</span>
+          <h3>Suggestions</h3>
+          <p>Old installers, forgotten build folders, games you stopped playing, crash dumps. Each one says why it's there.</p>
+        </div>
+      </a>
+      <a class="card" href="guides/disk-usage.html#search">
+        <img src="images/age.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · macOS · Linux</span>
+          <h3>Search and file types</h3>
+          <p>Find the largest files, everything over 1 GB that hasn't changed in a year, or every <code>.iso</code> on the drive.</p>
+        </div>
+      </a>
+      <a class="card" href="guides/cleaner.html">
+        <img src="images/cleaner.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · macOS · Linux</span>
+          <h3>Cleaner</h3>
+          <p>Caches and temporary files from a fixed list of known locations. See exactly which files go before you press Clean.</p>
+        </div>
+      </a>
+      <a class="card" href="guides/hardware.html">
+        <img src="images/hardware.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · Linux</span>
+          <h3>Hardware monitor</h3>
+          <p>Temperatures, load, power and fans in a live dashboard, plus every sensor in one table with history charts.</p>
+        </div>
+      </a>
+      <a class="card" href="guides/duplicates.html">
+        <img src="images/compress.webp" alt="" loading="lazy" width="1360" height="860">
+        <div class="card-body">
+          <span class="tag">Windows · macOS · Linux</span>
+          <h3>Free space without deleting</h3>
+          <p>Replace duplicates with links, compress games you rarely update, or move a folder to another drive.</p>
+        </div>
+      </a>
+    </div>
+    <p style="text-align:center;margin-top:24px;color:var(--muted)">Also: <a href="guides/cleaning-up.html#build-junk">build junk</a>, <a href="guides/duplicates.html">duplicates</a>, <a href="guides/alerts.html">free space alerts</a>, and on Windows, <a href="guides/windows-tools.html">startup programs, uninstalling and updates, and registry issues</a>.</p>
+  </section>
+
+  <section class="section">
+    <div class="split">
+      <div>
+        <h2>Careful by design</h2>
+        <p>Cleanup tools have a reputation for deleting the wrong thing. Heft tries hard to be the one you can trust.</p>
+        <ul class="checks">
+          <li>Explains what a file or folder is, in plain language, before you can delete it.</li>
+          <li>Sends files to the Recycle Bin or Trash, and keeps a list so you can restore them.</li>
+          <li>Asks twice before removing anything that could stop your computer from starting.</li>
+          <li>Cleans only from a fixed list of known locations, and shows the exact files first.</li>
+          <li>Backs up every registry change, and says so when a cleanup won't make your PC faster.</li>
+          <li>Never installs drivers and never sends your data anywhere.</li>
+        </ul>
+        <a href="guides/cleaning-up.html">How Heft keeps deleting safe</a>
+      </div>
+      <figure class="shot">
+        <img src="images/delete-warning.webp" width="1360" height="860" loading="lazy" alt="A confirmation dialog warning that System32 is part of Windows, with a checkbox to confirm before deleting">
+      </figure>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Fast, and counted correctly</h2>
+    <p class="sub">Run as administrator on an NTFS drive and Heft reads the master file table directly instead of opening every folder.</p>
+    <div class="stats">
+      <div class="stat"><div class="num">6 s</div><p>to scan a 1.5 TB drive with 2.7 million files, compared to about 30 seconds for a regular folder scan.</p></div>
+      <div class="stat"><div class="num">24 GB</div><p>that a plain folder scan over-counted on the same drive, mostly hard links in the Windows component store. Heft counts each file once.</p></div>
+      <div class="stat"><div class="num">0 bytes</div><p>downloaded from OneDrive, Dropbox or iCloud. Online-only files count as 0 on disk and are never read.</p></div>
+      <div class="stat"><div class="num">Live</div><p>After a fast scan, Rescan reads only what the NTFS change journal says has changed.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Runs on</h2>
+    <p class="sub">Heft is built and tested on Windows. The macOS and Linux builds pass the test suite on every change but haven't been tried on real hardware yet, so reports are welcome.</p>
+    <div class="stats">
+      <div class="stat"><div class="num" style="font-size:1.3rem">Windows 10 and 11</div><p>Everything: disk usage with the fast MFT scan, Cleaner, hardware monitor, startup programs, uninstalling and updates, registry issues.</p></div>
+      <div class="stat"><div class="num" style="font-size:1.3rem">macOS 11 and later</div><p>Disk usage and the Cleaner, for Apple Silicon and Intel Macs.</p></div>
+      <div class="stat"><div class="num" style="font-size:1.3rem">Linux (x86_64)</div><p>Disk usage, the Cleaner and the hardware monitor.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="cta">
+      <h2>Find your missing gigabytes</h2>
+      <p style="color:var(--muted)">Heft is a single program with no installer. Download it, open it, pick a drive.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/gjnail/heft/releases/latest">Download Heft 1.0</a>
+        <a class="btn btn-secondary" href="tutorial.html">Start the tutorial</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

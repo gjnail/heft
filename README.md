@@ -9,15 +9,22 @@ programs and the registry.
 
 Heft runs on Windows today. macOS and Linux builds are in progress.
 
+**[Website](https://gjnail.github.io/heft/)** ·
+**[Tutorial](https://gjnail.github.io/heft/tutorial.html)** ·
+**[Guides](https://gjnail.github.io/heft/guides/)** ·
+**[FAQ](https://gjnail.github.io/heft/faq.html)** ·
+**[Download](https://github.com/gjnail/heft/releases/latest)**
+
 It tries to be the careful option: it explains what something is before you
 remove it, sends files to the Recycle Bin or Trash whenever it can, backs up
 every registry change, and tells you plainly when a cleanup won't make much
 difference.
 
-![Heft showing a folder tree and a treemap of a demo disk](docs/screenshot.png)
+![Heft showing a folder tree and a treemap of a demo disk](site/images/overview.webp)
 
-The screenshots use Heft's demo disk (`HEFT_DEMO=1`). All the files in them
-are made up.
+The disk usage screenshots use Heft's demo disk (`HEFT_DEMO=1`), so all the
+files in them are made up. The Cleaner and Hardware screenshots are from a real
+PC.
 
 ## What's in Heft
 
@@ -63,7 +70,9 @@ stand out as groups.
   path, Highlight all files of that type, Compress, Move to another drive, and
   Move to Recycle Bin or Trash.
 
-![Treemap colored by file age, next to the largest files list](docs/screenshot-age.png)
+![Treemap colored by file age, next to the largest files on the Search tab](site/images/age.webp)
+
+More in the guide: [Finding what uses space](https://gjnail.github.io/heft/guides/disk-usage.html).
 
 ### Suggestions
 
@@ -89,6 +98,8 @@ with the space it would free and the reason it's there:
 
 Only clearly disposable items are pre-selected. Anything that could break
 your system is left out, and nothing is removed until you confirm.
+
+![The Suggestions tab listing big old files, old installers and the hibernation file](site/images/suggestions.webp)
 
 ### Folders, file types and search
 
@@ -145,8 +156,12 @@ language in the treemap tooltip, the right-click menu and the delete dialog:
 what could go wrong, and what to do instead. Deleting something that could
 stop the computer from starting needs an extra confirmation.
 
+![The delete dialog for System32, with a warning that it is part of Windows](site/images/delete-warning.webp)
+
 The Removed tab lists everything Heft has moved to the Recycle Bin or Trash,
-with a Restore button on Windows and Linux.
+and can put them back on Windows and Linux.
+
+More in the guide: [Cleaning up safely](https://gjnail.github.io/heft/guides/cleaning-up.html).
 
 ### Freeing space without deleting
 
@@ -189,6 +204,10 @@ while it's missing. Heft won't move system folders, folders that contain
 links, or folders with online-only files. To undo a move, delete the link and
 move the folder back.
 
+![The Compress dialog for a game folder](site/images/compress.webp)
+
+More in the guide: [Duplicates and saving space](https://gjnail.github.io/heft/guides/duplicates.html).
+
 ### Export
 
 The Export menu saves the folder shown in the treemap as a CSV file (every
@@ -207,10 +226,14 @@ On Windows, Heft can keep watching from the notification area after you
 close the window, and start with Windows, hidden there until a drive gets
 full. Right-click the icon to quit.
 
+More in the guide: [Free space alerts](https://gjnail.github.io/heft/guides/alerts.html).
+
 ## Cleaner
 
 The Cleaner removes caches, temporary files and logs that programs recreate
 when they need them. It works on Windows, macOS and Linux.
+
+![The Cleaner page with its rules on the left and the results by size on the right](site/images/cleaner.webp)
 
 It only touches locations from a fixed catalog; there's no searching the disk
 for anything that looks like `*.tmp`. The catalog covers:
@@ -270,9 +293,13 @@ On Windows the Cleaner also has:
 `heft --clean` runs your saved selection from the command line on any
 platform, and `heft --clean --dry-run` only reports what it would remove.
 
+More in the guide: [The Cleaner](https://gjnail.github.io/heft/guides/cleaner.html).
+
 ## Hardware monitor
 
 Available on Windows and Linux.
+
+![The Hardware dashboard with gauges for load, temperatures and memory, and a card for each device](site/images/hardware.webp)
 
 - **Dashboard:** CPU and GPU temperature, load and power, memory, and the
   hottest drive, with a card for every device underneath. Temperatures are
@@ -295,6 +322,8 @@ works and says what's missing. Everything else, including graphics cards and
 drive temperatures, works without extra software. Linux needs nothing extra.
 
 `heft --sensors` prints every reading in a terminal.
+
+More in the guide: [Hardware monitor](https://gjnail.github.io/heft/guides/hardware.html).
 
 ## Windows tools
 
@@ -343,6 +372,8 @@ compatibility settings and cached program names.
 
 This is housekeeping. It won't make your PC faster, and Heft doesn't claim it
 will.
+
+More in the guide: [Startup, programs and registry](https://gjnail.github.io/heft/guides/windows-tools.html).
 
 ## Speed and accuracy
 
@@ -489,8 +520,10 @@ heft --icon <out.png> [--size N]    write the app icon (used by the packaging sc
 ```
 
 `--walk` makes `--bench`, `--export` and `--render` use the directory scanner
-instead of the MFT, and `--out <file>` writes the report to a file instead of
-the terminal.
+instead of the MFT, and `--out <file>` saves the report to a file as well as
+printing it.
+
+More in the guide: [Command line](https://gjnail.github.io/heft/guides/command-line.html).
 
 ## Privacy
 

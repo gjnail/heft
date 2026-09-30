@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cleaning up safely · Heft</title>
+  <meta name="description" content="How Heft's Suggestions and Build junk tabs work, what its warnings mean, and how to delete files and put them back.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html" aria-current="page">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Cleaning up safely</h1>
+    <span class="platforms">Windows · macOS · Linux</span>
+    <p class="lede">Heft points out what you probably don't need, tells you why, and makes sure you know what you're deleting before it goes.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#suggestions">Suggestions</a></li>
+        <li><a href="#build-junk">Build junk</a></li>
+        <li><a href="#warnings">What the warnings mean</a></li>
+        <li><a href="#deleting">Deleting</a></li>
+        <li><a href="#removed">Putting things back</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="suggestions">Suggestions</h2>
+    <figure class="shot">
+      <a href="../images/suggestions.webp"><img src="../images/suggestions.webp" width="1360" height="860" loading="lazy" alt="The Suggestions tab with three suggestions and their sizes"></a>
+      <figcaption>Old installers are ticked because you can download them again. Big old files are listed but left for you to decide.</figcaption>
+    </figure>
+    <p>The <strong>Suggestions</strong> tab reads the scan and lists things that are usually safe to remove, largest first. Each one says how much space it frees and why it's on the list. Click any item to see it in the map.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Suggestion</th><th>What it finds</th><th>Ticked for you</th></tr></thead>
+        <tbody>
+          <tr><td>Old installers in Downloads</td><td>Setup files for programs you've probably already installed.</td><td>Yes</td></tr>
+          <tr><td>Repeated downloads</td><td>Files like <code>report (1).pdf</code> that are the same size as a file with the original name.</td><td>Yes</td></tr>
+          <tr><td>Build folders in inactive projects</td><td><code>node_modules</code>, build output and caches in projects you haven't changed in six months.</td><td>Yes</td></tr>
+          <tr><td>Very large log files</td><td>Logs are only needed when troubleshooting.</td><td>Yes</td></tr>
+          <tr><td>Crash dumps</td><td>Snapshots saved when a program crashed.</td><td>Yes</td></tr>
+          <tr><td>Big files untouched for two years</td><td>Large videos, disk images and archives that haven't changed in over two years.</td><td>No</td></tr>
+          <tr><td>Steam games you haven't played in a year</td><td>Heft reads Steam's small library files to learn when each game was last played. Each game has an <strong>Uninstall in Steam</strong> button, so Steam stays in charge of its library.</td><td>n/a</td></tr>
+          <tr><td>Temporary files and caches</td><td>What the <a href="cleaner.html">Cleaner</a> would remove. Opens the Cleaner page.</td><td>n/a</td></tr>
+          <tr><td>A full Recycle Bin or Trash</td><td>Deleted files keep using space until the bin is emptied.</td><td>n/a</td></tr>
+          <tr><td>Large virtual disks</td><td>WSL, Docker and virtual machine disks that grow but don't shrink by themselves.</td><td>n/a</td></tr>
+          <tr><td>Previous Windows installation</td><td>A <code>Windows.old</code> folder left by an upgrade.</td><td>n/a</td></tr>
+          <tr><td>Hibernation file</td><td>The space Windows reserves for hibernation and Fast Startup.</td><td>n/a</td></tr>
+          <tr><td>Programs and games you haven't updated in three months</td><td>Folders that could be <a href="duplicates.html#compress">compressed</a> in place (Windows, NTFS).</td><td>n/a</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Suggestions marked n/a aren't things Heft sends to the Recycle Bin. They explain what to do and, where there's a right tool for the job, point you to it: Steam for games, Disk Cleanup for <code>Windows.old</code>, <code>powercfg /hibernate off</code> for the hibernation file, or the Cleaner page for caches and virtual disks.</p>
+    <p>Anything Heft considers dangerous to delete never appears as a suggestion.</p>
+
+    <h2 id="build-junk">Build junk</h2>
+    <figure class="shot">
+      <a href="../images/build-junk.webp"><img src="../images/build-junk.webp" width="1360" height="860" loading="lazy" alt="The Build junk tab listing three node_modules folders with their sizes"></a>
+      <figcaption>Build junk only lists a folder when the project around it proves what it is.</figcaption>
+    </figure>
+    <p>Developers collect folders that build tools and package managers can recreate on demand. The <strong>Build junk</strong> tab finds them:</p>
+    <ul>
+      <li><code>node_modules</code> and JavaScript build caches (<code>.next</code>, <code>.nuxt</code>, <code>.vite</code>, <code>.turbo</code>, <code>.svelte-kit</code>, <code>.angular</code>, <code>.parcel-cache</code>);</li>
+      <li>Rust <code>target</code> folders and other caches marked with a <code>CACHEDIR.TAG</code> file (pytest, mypy, ruff and others);</li>
+      <li>.NET <code>bin</code> and <code>obj</code>, Gradle <code>build</code> and <code>.gradle</code>, Python <code>.tox</code> and <code>.nox</code>;</li>
+      <li>Unity <code>Library</code>, Unreal <code>Intermediate</code> and <code>DerivedDataCache</code>, Godot <code>.godot</code>.</li>
+    </ul>
+    <p>A folder is listed only when the project around it confirms what it is: a <code>package.json</code> next to <code>node_modules</code>, a <code>.uproject</code> next to <code>Intermediate</code>, and so on. A folder that just happens to be called <code>build</code> or <code>Library</code> is never listed.</p>
+    <p>Use <strong>Select untouched for</strong> 1 month, 3 months or 1 year to tick only folders in projects you haven't worked on lately, then <strong>Recycle</strong> them. The next build brings back whatever a project needs.</p>
+
+    <h2 id="warnings">What the warnings mean</h2>
+    <p>Heft marks files and folders that are risky to delete with a triangle in the tree, and explains the risk in the treemap tooltip, the right-click menu and the delete dialog. There are two levels:</p>
+    <ul>
+      <li><strong>Caution (yellow):</strong> deleting it might break an app or lose data. For example installed programs, app settings and data, cloud-synced folders, mailboxes, saved games, a Git repository's history, virtual disks, the hibernation file and Time Machine backups.</li>
+      <li><strong>Danger (red):</strong> deleting it might stop the computer from starting or working. For example Windows and macOS system folders, device drivers, startup files, a user profile or home folder, the user registry, keychains and whole drives.</li>
+    </ul>
+    <p>Each warning says what could go wrong and what to do instead, such as using Disk Cleanup for the Windows folder or your package manager on Linux.</p>
+    <div class="note"><p>The warnings err on the side of caution. They never block you on their own; they make sure you see why something might be a bad idea.</p></div>
+
+    <h2 id="deleting">Deleting</h2>
+    <figure class="shot">
+      <a href="../images/delete-warning.webp"><img src="../images/delete-warning.webp" width="1360" height="860" loading="lazy" alt="The delete dialog for System32 with a danger warning and an unticked confirmation checkbox"></a>
+      <figcaption>Anything marked Danger needs an extra tick before Move anyway is enabled.</figcaption>
+    </figure>
+    <p>Right-click anything and choose <strong>Move to Recycle Bin</strong> (Trash on macOS and Linux), or select it and press <kbd>Delete</kbd> (<kbd>Cmd</kbd>+<kbd>Backspace</kbd> on a Mac). You can also delete in bulk from Suggestions, Search, Duplicates and Build junk.</p>
+    <p>The dialog always shows how many items, how much space and how many files are involved, and lists any warnings. For anything marked Danger you have to tick <strong>I understand this could break my system</strong> first.</p>
+    <p>Everything goes to the Recycle Bin or Trash. The space comes back when you empty it, which you can do from the desktop or with the Recycle Bin item on the <a href="cleaner.html">Cleaner</a> page.</p>
+
+    <h2 id="removed">Putting things back</h2>
+    <p>The <strong>Removed</strong> tab lists everything Heft has moved to the Recycle Bin or Trash, newest first, even across restarts.</p>
+    <ul>
+      <li><strong>Windows and Linux:</strong> select items and press <strong>Put back</strong>. Rescan to see them in the map again.</li>
+      <li><strong>macOS:</strong> press <strong>Open the Trash</strong> and use Finder's Put Back.</li>
+    </ul>
+    <p>Once the Recycle Bin or Trash has been emptied, the files are gone for good.</p>
+
+    <div class="pager">
+      <a href="disk-usage.html"><small>Previous</small>Finding what uses space</a>
+      <a class="next" href="duplicates.html"><small>Next</small>Duplicates and saving space</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>
