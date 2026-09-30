@@ -1,6 +1,10 @@
 //! Scanning: picks the fast MFT reader when possible (Windows, NTFS, admin),
 //! otherwise walks the directory tree in parallel. Runs on a background thread.
+//! Rescans read only what changed since: from the NTFS change journal after
+//! an MFT scan, and from FSEvents after a scan of a local disk on macOS.
 
+#[cfg(target_os = "macos")]
+pub mod fsevents;
 #[cfg(windows)]
 pub mod mft;
 pub mod mft_parse;
@@ -48,23 +52,37 @@ impl Progress {
 #[cfg(windows)]
 pub type Incremental = mft::MftState;
 
-/// Never created: only NTFS on Windows supports incremental rescans.
-#[cfg(not(windows))]
+/// What a scan of a local disk keeps for quick rescans through FSEvents.
+#[cfg(target_os = "macos")]
+pub type Incremental = fsevents::FsState;
+
+/// Never created: incremental rescans need NTFS on Windows or FSEvents on macOS.
+#[cfg(not(any(windows, target_os = "macos")))]
 pub struct Incremental(std::convert::Infallible);
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 pub enum RefreshOutcome {
     Unchanged,
     Updated(Tree),
-    /// The journal can't bring the scan up to date; do a full scan.
+    /// The change history can't bring the scan up to date; do a full scan.
     NeedFullScan(String),
 }
 
-/// Bring a finished MFT scan up to date from the NTFS change journal.
-#[cfg(windows)]
-pub fn refresh(state: &mut Incremental, progress: &Progress) -> RefreshOutcome {
+/// Bring a finished scan up to date from the NTFS change journal (Windows)
+/// or the file system event history (macOS). `tree` is the scan as shown
+/// now: the last one the scan or a refresh returned, which on macOS is the
+/// base the changes are applied to.
+#[cfg(any(windows, target_os = "macos"))]
+pub fn refresh(state: &mut Incremental, tree: &Tree, progress: &Progress) -> RefreshOutcome {
     let t0 = Instant::now();
-    match mft::refresh(state, progress) {
+    #[cfg(windows)]
+    let result = {
+        let _ = tree;
+        mft::refresh(state, progress)
+    };
+    #[cfg(target_os = "macos")]
+    let result = fsevents::refresh(state, tree, progress);
+    match result {
         Ok(None) => RefreshOutcome::Unchanged,
         Ok(Some(mut tree)) => {
             tree.info.duration_ms = t0.elapsed().as_millis() as u64;
@@ -75,8 +93,8 @@ pub fn refresh(state: &mut Incremental, progress: &Progress) -> RefreshOutcome {
     }
 }
 
-#[cfg(not(windows))]
-pub fn refresh(state: &mut Incremental, _progress: &Progress) -> RefreshOutcome {
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn refresh(state: &mut Incremental, _tree: &Tree, _progress: &Progress) -> RefreshOutcome {
     match state.0 {}
 }
 
@@ -169,6 +187,22 @@ fn mft_scan_with_state(_root: &str, _progress: &Progress) -> Result<(Tree, Optio
     Err("not supported on this platform".into())
 }
 
+/// The directory walk, keeping what FSEvents rescans need when asked (it
+/// costs a copy of the tree).
+#[cfg(target_os = "macos")]
+fn walk_with_state(root: &str, keep: bool, progress: &Progress) -> Result<(Tree, Option<Box<Incremental>>), String> {
+    if keep {
+        fsevents::scan(root, progress).map(|(t, s)| (t, s.map(Box::new)))
+    } else {
+        walk::scan(root, progress).map(|t| (t, None))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn walk_with_state(root: &str, _keep: bool, progress: &Progress) -> Result<(Tree, Option<Box<Incremental>>), String> {
+    walk::scan(root, progress).map(|t| (t, None))
+}
+
 pub fn start(root: &str, allow_mft: bool, on_done: impl Fn() + Send + 'static) -> ScanHandle {
     let root = normalize_root(root);
     let progress = Arc::new(Progress::default());
@@ -179,7 +213,7 @@ pub fn start(root: &str, allow_mft: bool, on_done: impl Fn() + Send + 'static) -
     std::thread::Builder::new()
         .name("scan".into())
         .spawn(move || {
-            let outcome = run(&root, allow_mft, &progress);
+            let outcome = run_with(&root, allow_mft, true, &progress);
             let _ = tx.send(outcome);
             on_done();
         })
@@ -187,8 +221,14 @@ pub fn start(root: &str, allow_mft: bool, on_done: impl Fn() + Send + 'static) -
     handle
 }
 
-/// Synchronous scan (used by the CLI and the background thread).
+/// Synchronous scan (used by the CLI).
 pub fn run(root: &str, allow_mft: bool, progress: &Progress) -> ScanOutcome {
+    run_with(root, allow_mft, false, progress)
+}
+
+/// Synchronous scan. With `keep_state`, a scan on macOS also returns what
+/// quick rescans need; an MFT scan always does.
+pub fn run_with(root: &str, allow_mft: bool, keep_state: bool, progress: &Progress) -> ScanOutcome {
     let t0 = Instant::now();
     let mut note = None;
     let mut result = None;
@@ -222,7 +262,10 @@ pub fn run(root: &str, allow_mft: bool, progress: &Progress) -> ScanOutcome {
             progress.dirs.store(0, Ordering::Relaxed);
             progress.bytes.store(0, Ordering::Relaxed);
             progress.set_fraction(None);
-            walk::scan(root, progress)
+            walk_with_state(root, keep_state, progress).map(|(t, s)| {
+                state = s;
+                t
+            })
         }
     };
     if progress.cancelled() {

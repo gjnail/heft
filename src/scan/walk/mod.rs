@@ -11,9 +11,13 @@
 mod portable;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod update;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(target_os = "macos")]
+pub use update::{update, Changes};
 #[cfg(windows)]
 pub use windows::list_root_files;
 
@@ -82,14 +86,42 @@ impl Hasher for IdHasher {
 
 type IdSet = HashSet<u128, BuildHasherDefault<IdHasher>>;
 
+/// What a tree doesn't store but a quick rescan needs to come out exactly
+/// like a full scan: the identity and own modification time of every
+/// folder, and the identity of every file with more than one name. Both
+/// lists are in node order. Only macOS rescans this way.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Default)]
+pub struct Ids {
+    pub dirs: Vec<(NodeId, u128, i64)>,
+    pub links: Vec<(NodeId, u128)>,
+}
+
 pub fn scan(root: &str, progress: &Progress) -> Result<Tree, String> {
-    #[cfg(windows)]
-    let lister = windows::WinLister::default();
-    #[cfg(target_os = "macos")]
-    let lister = macos::BulkLister;
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let lister = portable::StdLister;
-    scan_with(root, progress, &lister, &skip_mounts())
+    scan_with(root, progress, &lister(), &skip_mounts(), None)
+}
+
+/// A scan that also returns the [`Ids`] quick rescans need.
+#[cfg(target_os = "macos")]
+pub fn scan_keeping_ids(root: &str, progress: &Progress) -> Result<(Tree, Ids), String> {
+    let mut ids = Ids::default();
+    let tree = scan_with(root, progress, &lister(), &skip_mounts(), Some(&mut ids))?;
+    Ok((tree, ids))
+}
+
+#[cfg(windows)]
+fn lister() -> windows::WinLister {
+    windows::WinLister::default()
+}
+
+#[cfg(target_os = "macos")]
+fn lister() -> macos::BulkLister {
+    macos::BulkLister
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn lister() -> portable::StdLister {
+    portable::StdLister
 }
 
 /// Mount points of virtual file systems (`/proc`, `/sys`, snapshots…) that a
@@ -104,7 +136,13 @@ fn skip_mounts() -> HashSet<PathBuf> {
     HashSet::new()
 }
 
-fn scan_with<L: Lister>(root: &str, progress: &Progress, lister: &L, skip: &HashSet<PathBuf>) -> Result<Tree, String> {
+fn scan_with<L: Lister>(
+    root: &str,
+    progress: &Progress,
+    lister: &L,
+    skip: &HashSet<PathBuf>,
+    mut ids: Option<&mut Ids>,
+) -> Result<Tree, String> {
     let root_path = PathBuf::from(root);
     let md = std::fs::metadata(&root_path).map_err(|e| format!("cannot open {root}: {e}"))?;
     if !md.is_dir() {
@@ -160,6 +198,13 @@ fn scan_with<L: Lister>(root: &str, progress: &Progress, lister: &L, skip: &Hash
                     e.flags |= flags::MOUNT;
                 }
                 let id = b.add(r.id, &e.name, e.flags, e.size, e.alloc, e.mtime);
+                if let Some(ids) = ids.as_deref_mut() {
+                    if is_dir {
+                        ids.dirs.push((id, e.file_id, e.mtime));
+                    } else if e.file_id != 0 {
+                        ids.links.push((id, e.file_id));
+                    }
+                }
                 if let Some(path) = child
                     && e.flags & flags::MOUNT == 0
                     && !progress.cancelled()
@@ -217,8 +262,11 @@ mod tests {
     /// .hidden         7 B
     /// ```
     fn fixture() -> PathBuf {
+        // Tests run in parallel, sometimes within the same clock tick.
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("heft-walk-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("heft-walk-{}-{nanos}-{n}", std::process::id()));
         std::fs::create_dir_all(dir.join("a").join("b")).unwrap();
         std::fs::create_dir_all(dir.join("c")).unwrap();
         std::fs::write(dir.join("a").join("x.bin"), vec![1u8; 1000]).unwrap();
@@ -252,7 +300,7 @@ mod tests {
     fn portable_lister_walks_a_tree() {
         let dir = fixture();
         let root = crate::scan::normalize_root(&dir.to_string_lossy());
-        let t = scan_with(&root, &Progress::default(), &portable::StdLister, &HashSet::new()).unwrap();
+        let t = scan_with(&root, &Progress::default(), &portable::StdLister, &HashSet::new(), None).unwrap();
         // Hard links are only identifiable through std on Unix (dev + inode).
         check(&t, cfg!(unix));
         if cfg!(unix) {
@@ -267,7 +315,7 @@ mod tests {
     fn windows_lister_walks_a_tree() {
         let dir = fixture();
         let root = crate::scan::normalize_root(&dir.to_string_lossy());
-        let t = scan_with(&root, &Progress::default(), &windows::WinLister::default(), &HashSet::new()).unwrap();
+        let t = scan_with(&root, &Progress::default(), &windows::WinLister::default(), &HashSet::new(), None).unwrap();
         check(&t, true);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -277,7 +325,7 @@ mod tests {
     fn macos_lister_walks_a_tree() {
         let dir = fixture();
         let root = crate::scan::normalize_root(&dir.to_string_lossy());
-        let t = scan_with(&root, &Progress::default(), &macos::BulkLister, &HashSet::new()).unwrap();
+        let t = scan_with(&root, &Progress::default(), &macos::BulkLister, &HashSet::new(), None).unwrap();
         check(&t, true);
         let hidden = child(&t, ROOT, ".hidden");
         assert!(t.node(hidden).flags & flags::HIDDEN != 0);
@@ -293,7 +341,7 @@ mod tests {
         let lister = windows::WinLister::default();
         #[cfg(not(windows))]
         let lister = portable::StdLister;
-        let t = scan_with(&root, &Progress::default(), &lister, &skip).unwrap();
+        let t = scan_with(&root, &Progress::default(), &lister, &skip, None).unwrap();
         let a = child(&t, ROOT, "a");
         assert!(t.node(a).flags & flags::MOUNT != 0);
         assert!(t.children(a).is_empty());

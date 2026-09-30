@@ -6,6 +6,131 @@ Notable changes to Heft. The format follows
 
 ## [Unreleased]
 
+The Mac version catches up with Windows: every page Windows has now has a Mac
+counterpart, tested on an Apple silicon Mac.
+
+### Added
+
+- macOS: Hardware monitor. Temperatures, loads, clocks and power for Apple
+  silicon's performance and efficiency cores and GPU, the Neural Engine and
+  memory, fan speeds and whole-system power, drive temperature and SSD wear,
+  memory, network and battery, all without an administrator password.
+  `heft --sensors` works on macOS too.
+- macOS: Login items page, the counterpart of Startup. Login items and launch
+  agents and daemons, with launchd's own on/off switch, removal with a backup,
+  who signed each program, and helpers inside apps for reference.
+- macOS: Apps page, the counterpart of Programs. Installed apps with measured
+  sizes, publisher, date added and last opened. Uninstalls through the app's
+  own uninstaller, Homebrew or the Trash, then checks `~/Library` and
+  `/Library` for leftovers. Updates through Homebrew, one app or all of them,
+  in a Terminal window.
+- macOS: Broken items page, the counterpart of the registry check. Launch
+  agents, login items, command-line links, Open With entries and package
+  receipts that point at apps and files that no longer exist, with a backup
+  before every change and a Backups list that restores them.
+- macOS: free space alerts can keep watching from the menu bar after the
+  window is closed, and start at login (a launch agent in
+  `~/Library/LaunchAgents`). The menu shows each drive's free space.
+  Notifications go through Notification Center when Heft runs from Heft.app,
+  and clicking one opens Heft. `heft --tray` starts hidden in the menu bar.
+- macOS: quick rescans and View › Update automatically, through FSEvents:
+  after a scan of a local disk, Rescan only lists the folders that changed,
+  and automatic updates start as soon as macOS reports a change.
+  `heft --check-refresh` works on macOS and gains `--wait`.
+- macOS: Compress and Uncompress folders on APFS and HFS+, with compression
+  suggestions for apps and Steam games. Each file is checked against the
+  original before it's swapped in. Apps installed for all users (App Store,
+  installer packages) can be included after the administrator password.
+- macOS: the Removed tab can put items back from the Trash. Heft now moves
+  things to the Trash itself instead of asking Finder, so it no longer needs
+  permission to control Finder.
+- macOS: suggestions for old macOS installers, iPhone and iPad software
+  downloads and backups, Time Machine's local snapshots, the hibernation image,
+  Docker Desktop's disk, Messages attachments, Xcode archives, Mail downloads
+  and Photos libraries (explained, with the right place to deal with each),
+  and warnings for more Mac locations (Mail, Messages, music libraries,
+  iCloud and other cloud folders, app bundles).
+- macOS Cleaner: temporary files, Quick Look thumbnails, Metal shader caches,
+  iPhone and iPad updates, system logs (administrator password), Docker build
+  cache, and privacy rules for recent items, Finder's recent folders, the
+  clipboard and the DNS cache. Teams, Epic Games Launcher, Java, Adobe, NuGet,
+  Deno and Composer caches. Weekly cleaning with a launch agent, and shortcuts
+  to Storage settings and to thinning Time Machine's local snapshots.
+- Cleaner on macOS and Linux: cookies, history, form history and last-session
+  rules for Chromium browsers and Firefox, as on Windows.
+- macOS Cleaner: Safari's cookies, history and last session, and new Teams'
+  cache. macOS protects them, so they're only listed when Heft has Full Disk
+  Access. Safari's history rule warns that iCloud syncs it back.
+- macOS: Remove download for iCloud Drive files and folders, in the
+  right-click menu and as a suggestion for big files that haven't changed in
+  a month. The files stay in iCloud and download again when opened, as with
+  Finder's Remove Download. Only files iCloud has finished syncing are
+  touched.
+- macOS Apps: Leftovers of deleted apps. Data containers and files in
+  `~/Library` from apps that are no longer installed anywhere on the Mac,
+  found by bundle id only and checked against every app, extension and
+  helper macOS knows. Nothing is ticked by default.
+- `heft --sensors --report` adds the Mac's model, chip and macOS version and
+  the raw SMC and HID sensor data, for fixing readings on Macs Heft hasn't
+  been tested on. The bug report form asks for it.
+- macOS: menus at the top of the screen. Heft (About, Settings… ⌘,), File
+  (Scan Folder… ⌘O, Rescan ⌘R, Close Window), View (each page with ⌘1 to
+  ⌘6, Dark Mode, Enter Full Screen), Window and Help.
+- Settings: appearance, free space alerts and starting at login, and on
+  macOS moving to the Trash through Finder, update checks and Full Disk
+  Access.
+- macOS: Finder's Put Back for what Heft moves to the Trash, when Settings ›
+  Move items to the Trash through Finder is on (macOS asks once to let Heft
+  control Finder). Heft's own Removed tab puts items back either way.
+- macOS Apps: App Store updates through `mas` when it's installed. Apps with
+  their own updater (Sparkle, Squirrel) say "updates itself" and have Open to
+  update; only if it's turned on in Settings, Heft asks Sparkle apps' update
+  feeds for newer versions.
+- macOS Login items: Show all background items lists everything macOS tracks
+  in Login Items & Extensions (`sfltool dumpbtm`, after the administrator
+  password), with whether each is allowed in the background.
+- macOS Broken items: Dock icons for apps and folders that no longer exist,
+  with a backup of each icon. Apps that were only moved don't count, since
+  the Dock follows them.
+- macOS: purgeable space. The start screen and the status bar show how much
+  more macOS can free by itself (local Time Machine snapshots, downloaded
+  iCloud files, caches), which Finder counts as available, so the two
+  figures no longer seem to disagree.
+- macOS: a note on the start screen explains what Heft can't see without Full
+  Disk Access, with a button to the right settings page. It goes away once
+  access is given, or when dismissed.
+- macOS: the start screen links to Login items and Apps as well as the
+  Cleaner.
+- A button in the top-right corner switches between light and dark mode: a
+  moon in light mode, a sun in dark mode. Heft remembers the choice; until
+  it's used, Heft follows the system theme.
+
+### Changed
+
+- Suggestions no longer pre-select anything that carries a warning.
+- Cleaner: files a program has open are skipped on macOS and Linux too, and
+  everything that needs a password is done after one prompt per clean
+  (`pkexec` on Linux, the administrator prompt on macOS).
+- Disk images, installer packages and `.ipsw` files are skipped when
+  compressing; `.hds` and `Docker.raw` count as virtual disks.
+- macOS: quick rescans no longer keep a second copy of the scan in memory,
+  roughly halving Heft's memory use after scanning a whole disk.
+- macOS Apps: launch agents and daemons moved to the Trash with an app's
+  leftovers are stopped too, instead of running until the next restart.
+  Daemons are stopped under the same password prompt as the move.
+
+### Fixed
+
+- macOS Apps: looking for an app's leftovers could make macOS ask to let Heft
+  access data from other apps. Without Full Disk Access, other apps' data
+  containers are now listed without looking inside them or measuring them.
+- macOS: Start at login and weekly cleaning stopped working when Heft.app was
+  moved. Heft now points them at its new place when it's next opened.
+- macOS: the startup disk wasn't listed on the start screen or in Scan drive,
+  and free space alerts watched no drive at all, on macOS 11 and later
+  (the system volume is mounted from a snapshot).
+- A Unity project's `Library` folder was flagged as the Mac's Library folder.
+
 ## [1.0.1] - 2026-09-29
 
 ### Fixed

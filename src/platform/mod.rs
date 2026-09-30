@@ -44,6 +44,10 @@ pub struct DriveInfo {
     pub kind: &'static str,
     pub total: u64,
     pub free: u64,
+    /// Space macOS frees by itself when it's needed (local Time Machine
+    /// snapshots, downloaded iCloud files, caches), which Finder counts as
+    /// available on top of `free`. 0 elsewhere.
+    pub purgeable: u64,
 }
 
 impl DriveInfo {
@@ -57,10 +61,18 @@ pub fn list_locations() -> Vec<DriveInfo> {
     let mut out = Vec::new();
     if let Some(home) = home_dir() {
         let (total, free) = free_space(&home).unwrap_or((0, 0));
-        out.push(DriveInfo { root: home, label: "Home folder".into(), fs: String::new(), kind: "Folder", total, free });
+        let purgeable = purgeable_space(&home, free);
+        out.push(DriveInfo { root: home, label: "Home folder".into(), fs: String::new(), kind: "Folder", total, free, purgeable });
     }
     out.extend(list_drives());
     out
+}
+
+/// Space macOS would free by itself on the volume holding `path`: what
+/// Finder calls available, less the `free` space `free_space` reported.
+#[cfg(not(target_os = "macos"))]
+pub fn purgeable_space(_path: &str, _free: u64) -> u64 {
+    0
 }
 
 pub fn home_dir() -> Option<String> {
@@ -81,6 +93,13 @@ pub fn data_dir() -> PathBuf {
             .map(|p| p.join("heft"))
     };
     dir.unwrap_or_else(|| std::env::temp_dir().join("heft"))
+}
+
+/// Move `path` to the Recycle Bin or Trash. On macOS this returns where it
+/// ended up in the Trash, so Heft can put it back later.
+#[cfg(not(target_os = "macos"))]
+pub fn move_to_trash(path: &std::path::Path) -> Result<Option<PathBuf>, String> {
+    trash::delete(path).map(|()| None).map_err(|e| e.to_string())
 }
 
 /// Key for comparing file names the way this platform's file systems do.

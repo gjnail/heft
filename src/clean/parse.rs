@@ -120,6 +120,68 @@ pub fn shell_quote(arg: &str) -> String {
     }
 }
 
+/// One `sh` script for everything that needs root, so the password is asked
+/// for once. Each job's commands run in order even if one fails; then the
+/// script prints `heft-status <job> <status>`, where the status is that of
+/// the job's last failing command, or 0.
+pub fn root_script(jobs: &[Vec<Vec<String>>]) -> String {
+    let mut parts = Vec::new();
+    for (i, cmds) in jobs.iter().enumerate() {
+        if cmds.is_empty() {
+            continue;
+        }
+        parts.push("s=0".to_string());
+        for c in cmds {
+            let line = c.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ");
+            parts.push(format!("{line} || s=$?"));
+        }
+        parts.push(format!("echo heft-status {i} $s"));
+    }
+    parts.join("; ")
+}
+
+/// The statuses `root_script` printed, by job. osascript turns line breaks
+/// into carriage returns, so both count.
+pub fn root_statuses(out: &str) -> std::collections::HashMap<usize, i32> {
+    out.split(['\n', '\r'])
+        .filter_map(|l| {
+            let mut f = l.trim().strip_prefix("heft-status ")?.split_whitespace();
+            Some((f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+/// A field of one line of `docker system df --format '{{json .}}'`. Values
+/// are plain strings there, so no JSON parser is needed.
+fn json_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let rest = &line[line.find(&format!("\"{key}\":\""))? + key.len() + 4..];
+    rest.split('"').next()
+}
+
+/// `docker system df --format '{{json .}}'` → (reclaimable bytes, unused
+/// entries) of the build cache.
+pub fn docker_build_cache(df: &str) -> (u64, u64) {
+    let Some(line) = df.lines().find(|l| json_field(l, "Type") == Some("Build Cache")) else { return (0, 0) };
+    // "1.2GB (50%)": Docker's sizes are 1000-based.
+    let bytes = json_field(line, "Reclaimable")
+        .and_then(|r| size(r.split(" (").next().unwrap_or(r), true))
+        .unwrap_or(0);
+    let count = |k| json_field(line, k).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let unused = count("TotalCount").saturating_sub(count("Active"));
+    (bytes, if bytes > 0 { unused.max(1) } else { unused })
+}
+
+/// `docker images --format '{{.Size}}'` → (total bytes, images).
+pub fn docker_image_sizes(list: &str) -> (u64, u64) {
+    list.lines().filter_map(|l| size(l, true)).fold((0, 0), |(b, n), s| (b + s, n + 1))
+}
+
+/// `tmutil listlocalsnapshots /` → how many local Time Machine snapshots.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn tm_snapshots(out: &str) -> usize {
+    out.lines().filter(|l| l.trim().starts_with("com.apple.TimeMachine.")).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +254,45 @@ org.gnome.Platform/x86_64/45\t1.1 GB
         assert_eq!(shell_quote("--revision=12"), "--revision=12");
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
         assert_eq!(shell_quote("a b"), "'a b'");
+    }
+
+    #[test]
+    fn root_scripts() {
+        let v = |c: &[&str]| c.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let jobs = vec![
+            vec![v(&["/usr/bin/dscacheutil", "-flushcache"]), v(&["/usr/bin/killall", "-HUP", "mDNSResponder"])],
+            vec![],
+            vec![v(&["/bin/rm", "-f", "--", "/Library/Logs/old one.log"])],
+        ];
+        assert_eq!(
+            root_script(&jobs),
+            "s=0; /usr/bin/dscacheutil -flushcache || s=$?; /usr/bin/killall -HUP mDNSResponder || s=$?; echo heft-status 0 $s; \
+             s=0; /bin/rm -f -- '/Library/Logs/old one.log' || s=$?; echo heft-status 2 $s"
+        );
+        let st = root_statuses("heft-status 0 0\rrm: x: Operation not permitted\rheft-status 2 1\r");
+        assert_eq!(st.get(&0), Some(&0));
+        assert_eq!(st.get(&2), Some(&1));
+        assert_eq!(st.len(), 2);
+        assert!(root_statuses("heft-status x 0\nheft-status 1\n").is_empty());
+    }
+
+    #[test]
+    fn docker() {
+        let df = r#"{"Active":"2","Reclaimable":"1.2GB (50%)","Size":"2.4GB","TotalCount":"5","Type":"Images"}
+{"Active":"0","Reclaimable":"0B","Size":"0B","TotalCount":"0","Type":"Containers"}
+{"Active":"0","Reclaimable":"0B","Size":"0B","TotalCount":"0","Type":"Local Volumes"}
+{"Active":"3","Reclaimable":"512.5MB","Size":"600MB","TotalCount":"31","Type":"Build Cache"}
+"#;
+        assert_eq!(docker_build_cache(df), (512_500_000, 28));
+        assert_eq!(docker_build_cache(""), (0, 0));
+        assert_eq!(docker_build_cache(r#"{"Active":"0","Reclaimable":"0B","Size":"0B","TotalCount":"0","Type":"Build Cache"}"#), (0, 0));
+        assert_eq!(docker_image_sizes("1.2GB\n512kB\n\n"), (1_200_512_000, 2));
+    }
+
+    #[test]
+    fn time_machine() {
+        let out = "Snapshots for disk /:\ncom.apple.TimeMachine.2026-09-29-101010.local\ncom.apple.TimeMachine.2026-09-29-111010.local\n";
+        assert_eq!(tm_snapshots(out), 2);
+        assert_eq!(tm_snapshots("Snapshots for disk /:\n"), 0);
     }
 }

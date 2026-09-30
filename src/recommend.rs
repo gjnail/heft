@@ -4,8 +4,9 @@
 //!
 //! Everything here comes from the scan itself, except Steam's small
 //! `appmanifest_*.acf` files, which are read to learn when a game was last
-//! played. Nothing is pre-selected unless it's clearly disposable, and
-//! anything the risk rules call dangerous is left out.
+//! played, and on macOS the list of Time Machine's local snapshots. Nothing
+//! is pre-selected unless it's clearly disposable, and anything the risk
+//! rules call dangerous is left out.
 
 use std::collections::HashMap;
 
@@ -46,6 +47,10 @@ pub enum Action {
     Steam(Vec<Game>),
     /// Compress the chosen folders; they stay installed and working.
     Compress,
+    /// Remove the downloaded copies of the chosen iCloud Drive files; they
+    /// stay in iCloud and download again when opened (macOS).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    RemoveDownload,
     /// Something Heft can't safely do itself; explain how.
     Explain { how: &'static str, tool: Option<Tool> },
 }
@@ -95,7 +100,7 @@ pub fn analyze(tree: &Tree, now: i64) -> Vec<Suggestion> {
                 logs.push(c);
             } else if matches!(ext, "dmp" | "mdmp" | "hdmp") && n.size >= MB {
                 dumps.push(c);
-            } else if matches!(ext, "vhdx" | "vhd" | "vdi" | "vmdk" | "qcow2") && n.size >= 10 * GB {
+            } else if matches!(ext, "vhdx" | "vhd" | "vdi" | "vmdk" | "qcow2" | "hds") && n.size >= 10 * GB {
                 vdisks.push(c);
             } else if n.size >= 500 * MB
                 && n.mtime > 0
@@ -234,6 +239,8 @@ pub fn analyze(tree: &Tree, now: i64) -> Vec<Suggestion> {
             });
         }
     }
+    #[cfg(target_os = "macos")]
+    mac_items(tree, &mut out, &usable);
     if let Some(bin) = trash_folder(tree)
         && tree.node(bin).size >= 500 * MB
     {
@@ -249,8 +256,7 @@ pub fn analyze(tree: &Tree, now: i64) -> Vec<Suggestion> {
         let bytes = vdisks.iter().map(|&v| tree.node(v).size).sum();
         out.push(Suggestion {
             title: format!("{} large virtual disk{}", vdisks.len(), plural(vdisks.len())),
-            detail: "WSL, Docker and virtual machine disks grow as you use them but don't shrink by themselves when you \
-                     delete files inside.",
+            detail: VDISK_DETAIL,
             bytes,
             items: vdisks,
             action: Action::Explain { how: SHRINK_VDISK, tool: cfg!(windows).then_some(Tool::Cleaner) },
@@ -259,17 +265,17 @@ pub fn analyze(tree: &Tree, now: i64) -> Vec<Suggestion> {
 
     // Size isn't known until it's done, so this one counts as 0 bytes and
     // sorts last.
-    let rarely = compress_candidates(tree, now);
+    let rarely = compress_candidates(tree, now, &steamapps, &can_compress);
     if !rarely.is_empty() && crate::compress::supported(std::path::Path::new(&tree.root_path)) {
+        let program = if cfg!(target_os = "macos") { "app" } else { "program" };
         out.push(Suggestion {
             title: format!(
-                "{} program{} and game{} you haven't updated in three months",
+                "{} {program}{} and game{} you haven't updated in three months",
                 rarely.len(),
                 plural(rarely.len()),
                 plural(rarely.len())
             ),
-            detail: "Compressing keeps them installed and working in less space. Windows unpacks the files as they're \
-                     read. How much you save depends on the program.",
+            detail: COMPRESS_DETAIL,
             bytes: 0,
             items: rarely,
             action: Action::Compress,
@@ -280,9 +286,69 @@ pub fn analyze(tree: &Tree, now: i64) -> Vec<Suggestion> {
     out
 }
 
+#[cfg(not(target_os = "macos"))]
+const COMPRESS_DETAIL: &str = "Compressing keeps them installed and working in less space. Windows unpacks the files \
+                               as they're read. How much you save depends on the program.";
+#[cfg(target_os = "macos")]
+const COMPRESS_DETAIL: &str = "Compressing keeps them installed and working in less space. macOS unpacks the files as \
+                               they're read. How much you save depends on the app.";
+
+/// Whether you can compress an installed program's folder. On macOS, App
+/// Store apps and apps installed for every user belong to the system, and
+/// only their owner can rewrite them.
+#[cfg(target_os = "macos")]
+fn can_compress(path: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(md) = std::fs::symlink_metadata(path) else { return false };
+    let uid = unsafe { libc::getuid() };
+    let writable = std::ffi::CString::new(path).is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0);
+    md.is_dir()
+        && (uid == 0 || md.uid() == uid)
+        && writable
+        && !std::path::Path::new(path).join("Contents/_MASReceipt").exists()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn can_compress(_path: &str) -> bool {
+    true
+}
+
 /// Installed programs and games that haven't changed in three months, are
-/// mostly compressible files, and aren't compressed already.
-fn compress_candidates(tree: &Tree, now: i64) -> Vec<NodeId> {
+/// mostly compressible files, aren't compressed already, and that you can
+/// change (`can_change`, given the folder's path).
+fn compress_candidates(tree: &Tree, now: i64, steamapps: &[NodeId], can_change: &dyn Fn(&str) -> bool) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = install_folders(tree, steamapps)
+        .iter()
+        .flat_map(|&p| tree.children(p).iter().copied())
+        .filter(|&c| {
+            let n = tree.node(c);
+            n.is_dir()
+                && n.alloc >= GB
+                && n.mtime > 0
+                && n.mtime < now - 90 * DAY
+                && n.alloc.saturating_mul(10) >= n.size.saturating_mul(9)
+                && n.flags & (flags::DELETED | flags::MOUNT | flags::SEEN | flags::LINK) == 0
+                && risk::assess(tree, c).is_none_or(|r| r.level < Level::Danger)
+        })
+        .filter(|&c| can_change(&tree.path(c)))
+        .filter(|&c| {
+            let worth: u64 = tree
+                .files_under(c)
+                .into_iter()
+                .filter(|&f| crate::compress::worth_trying(tree.ext_name(f), tree.node(f).size))
+                .map(|f| tree.node(f).alloc)
+                .sum();
+            worth * 2 >= tree.node(c).alloc
+        })
+        .collect();
+    out.sort_by_key(|&c| std::cmp::Reverse(tree.node(c).alloc));
+    out.truncate(20);
+    out
+}
+
+/// Folders whose subfolders are installed programs and games.
+#[cfg(not(target_os = "macos"))]
+fn install_folders(tree: &Tree, _steamapps: &[NodeId]) -> Vec<NodeId> {
     let mut parents = Vec::new();
     let mut stack = vec![(ROOT, 0)];
     while let Some((id, depth)) = stack.pop() {
@@ -301,32 +367,320 @@ fn compress_candidates(tree: &Tree, now: i64) -> Vec<NodeId> {
             }
         }
     }
-    let mut out: Vec<NodeId> = parents
-        .iter()
-        .flat_map(|&p| tree.children(p).iter().copied())
-        .filter(|&c| {
-            let n = tree.node(c);
-            n.is_dir()
-                && n.alloc >= GB
-                && n.mtime > 0
-                && n.mtime < now - 90 * DAY
-                && n.alloc.saturating_mul(10) >= n.size.saturating_mul(9)
-                && n.flags & (flags::DELETED | flags::MOUNT | flags::SEEN | flags::LINK) == 0
-                && risk::assess(tree, c).is_none_or(|r| r.level < Level::Danger)
+    parents
+}
+
+/// Folders whose subfolders are installed apps and games: Applications and
+/// your own ~/Applications, and Steam's `common` folder (deep in
+/// ~/Library/Application Support, or wherever a Steam library is).
+#[cfg(target_os = "macos")]
+fn install_folders(tree: &Tree, steamapps: &[NodeId]) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = std::iter::once("/Applications".to_string())
+        .chain(homes(tree).iter().map(|h| format!("{h}/Applications")))
+        .filter_map(|p| tree.find(&p))
+        .collect();
+    out.extend(
+        steamapps
+            .iter()
+            .filter_map(|&s| tree.children(s).iter().copied().find(|&c| tree.name(c).eq_ignore_ascii_case("common"))),
+    );
+    out
+}
+
+/// The home folders in the scan: every folder in `/Users`, or the one the
+/// scanned folder is in.
+#[cfg(target_os = "macos")]
+fn homes(tree: &Tree) -> Vec<String> {
+    if let Some(users) = tree.find("/Users") {
+        return tree.children(users).iter().filter(|&&c| tree.node(c).is_dir()).map(|&c| tree.path(c)).collect();
+    }
+    let comps: Vec<&str> = tree.root_path.split('/').filter(|c| !c.is_empty()).collect();
+    match comps.as_slice() {
+        [users, name, ..] if users.eq_ignore_ascii_case("users") => vec![format!("/Users/{name}")],
+        _ => Vec::new(),
+    }
+}
+
+/// macOS: big things in known places that Heft either lists or explains:
+/// old macOS installers, iPhone updates and backups, the hibernation image,
+/// Docker Desktop's disk, and what Messages, Mail, Xcode and Photos keep.
+#[cfg(target_os = "macos")]
+fn mac_items(tree: &Tree, out: &mut Vec<Suggestion>, usable: &dyn Fn(NodeId) -> bool) {
+    let installers: Vec<NodeId> = tree
+        .find("/Applications")
+        .map(|apps| {
+            tree.children(apps)
+                .iter()
+                .copied()
+                .filter(|&c| {
+                    let name = tree.name(c).to_lowercase();
+                    tree.node(c).is_dir()
+                        && (name.starts_with("install macos") || name.starts_with("install os x"))
+                        && name.ends_with(".app")
+                        && tree.node(c).size >= GB
+                        && usable(c)
+                })
+                .collect()
         })
+        .unwrap_or_default();
+    push_files(
+        out,
+        tree,
+        installers,
+        "Old macOS installers",
+        "Full macOS installers left in Applications after an upgrade, or downloaded to make a startup disk. They \
+         take several GB each, and you can download them again from Apple if you ever need one.",
+        false,
+    );
+
+    let homes = homes(tree);
+    let ipsw: Vec<NodeId> = homes
+        .iter()
+        .filter_map(|h| tree.find(&format!("{h}/Library/iTunes")))
+        .flat_map(|d| tree.files_under(d))
+        .filter(|&f| tree.ext_name(f).eq_ignore_ascii_case("ipsw") && usable(f))
+        .collect();
+    push_files(
+        out,
+        tree,
+        ipsw,
+        "iPhone and iPad software downloads",
+        "Copies of iOS and iPadOS that Finder downloaded to update or restore a device. Finder downloads a fresh one \
+         when it needs it.",
+        true,
+    );
+
+    for h in &homes {
+        if let Some(b) = tree.find(&format!("{h}/Library/Application Support/MobileSync/Backup"))
+            && tree.node(b).size >= 500 * MB
+        {
+            out.push(Suggestion {
+                title: "iPhone and iPad backups".to_string(),
+                detail: "Finder keeps a full backup of each iPhone and iPad you back up to this Mac, including \
+                         devices you no longer have.",
+                bytes: tree.node(b).size,
+                items: vec![b],
+                action: Action::Explain {
+                    how: "Remove old ones in Finder rather than here: connect an iPhone or iPad, select it in the \
+                          sidebar and click Manage Backups. The list shows every device's backups by name and date; \
+                          select the ones you don't need and click Delete Backup. The folders here are named by \
+                          device ID, so it's easy to delete the wrong one by hand.",
+                    tool: None,
+                },
+            });
+        }
+    }
+
+    if let Some(s) = tree.find("/private/var/vm/sleepimage")
+        && tree.node(s).size >= 500 * MB
+    {
+        out.push(Suggestion {
+            title: "Hibernation image".to_string(),
+            detail: "macOS writes what's in memory to this file when a laptop sleeps, so your work survives if the \
+                     battery runs out.",
+            bytes: tree.node(s).size,
+            items: vec![s],
+            action: Action::Explain {
+                how: "Keep it on a laptop. On a Mac that's always plugged in, you can turn hibernation off by running \
+                      `sudo pmset -a hibernatemode 0` in Terminal, then `sudo rm /private/var/vm/sleepimage` to \
+                      remove the file. `sudo pmset -a hibernatemode 3` turns it back on.",
+                tool: None,
+            },
+        });
+    }
+
+    // Docker.raw is sparse: its size is the limit, its space on disk is what it holds.
+    let docker: Vec<NodeId> = homes
+        .iter()
+        .filter_map(|h| tree.find(&format!("{h}/Library/Containers/com.docker.docker")))
+        .flat_map(|d| tree.files_under(d))
+        .filter(|&f| tree.name(f).eq_ignore_ascii_case("Docker.raw") && tree.node(f).alloc >= 10 * GB)
+        .collect();
+    if !docker.is_empty() {
+        out.push(Suggestion {
+            title: "Docker Desktop's disk".to_string(),
+            detail: "Docker Desktop keeps every image, container and volume in this one file. It grows as you pull \
+                     and build, and only shrinks when you remove things in Docker.",
+            bytes: docker.iter().map(|&d| tree.node(d).alloc).sum(),
+            items: docker,
+            action: Action::Explain {
+                how: "Remove what you no longer need with `docker system prune -a` in Terminal (add `--volumes` to \
+                      include unused volumes), or in Docker Desktop's Images, Containers and Volumes views. Docker \
+                      Desktop then gives the space back to macOS, which can take a few minutes. Don't delete \
+                      Docker.raw itself: everything in Docker goes with it.",
+                tool: None,
+            },
+        });
+    }
+
+    // What an app keeps that the app itself should clean up: only explained.
+    for h in &homes {
+        explain_folder(
+            out,
+            tree,
+            &format!("{h}/Library/Messages/Attachments"),
+            500 * MB,
+            "Messages attachments",
+            "Every photo, video and file sent or received in Messages is kept on this Mac, including in conversations \
+             you no longer read.",
+            "Delete them in macOS rather than here, so your conversations don't end up with missing pieces: System \
+             Settings › General › Storage, then the ⓘ next to Messages, lists the largest attachments to delete. Or set \
+             Messages › Settings › General › Keep messages to a year or 30 days, which removes older messages with \
+             their attachments. With Messages in iCloud on, deleting removes them from your other devices too.",
+        );
+        explain_folder(
+            out,
+            tree,
+            &format!("{h}/Library/Developer/Xcode/Archives"),
+            GB,
+            "Xcode archives",
+            "Builds you archived to upload to the App Store or share, each with the app and its debug symbols.",
+            "Keep the archives of versions people still use: their debug symbols make crash reports readable. Delete \
+             older ones in Xcode's Organizer (Window › Organizer › Archives), which shows each one's version and date.",
+        );
+        explain_folder(
+            out,
+            tree,
+            &format!("{h}/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
+            200 * MB,
+            "Mail downloads",
+            "Copies of attachments you opened from Mail. The attachments themselves stay in the messages.",
+            "Mail removes these by itself, as set in Mail › Settings › General › Remove unedited downloads: choose \
+             When Mail Quits to keep this folder small. Attachments you edited are kept, so look in the folder for \
+             anything you changed and want to keep.",
+        );
+        // Photos libraries, usually one in Pictures.
+        let libraries: Vec<NodeId> = tree
+            .find(&format!("{h}/Pictures"))
+            .map(|p| {
+                tree.children(p)
+                    .iter()
+                    .copied()
+                    .filter(|&c| tree.node(c).is_dir() && tree.name(c).to_lowercase().ends_with(".photoslibrary"))
+                    .filter(|&c| tree.node(c).alloc >= 5 * GB)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !libraries.is_empty() {
+            out.push(Suggestion {
+                title: "Photos library".to_string(),
+                detail: "Photos keeps the full-size original of every photo and video in its library on this Mac.",
+                bytes: libraries.iter().map(|&l| tree.node(l).alloc).sum(),
+                items: libraries,
+                action: Action::Explain {
+                    how: "If you use iCloud Photos, turn on Photos › Settings › iCloud › Optimize Mac Storage: the \
+                          originals stay in iCloud, this Mac keeps smaller versions and downloads an original when you \
+                          open it, and macOS frees space that way as the disk fills up. Never delete files inside the \
+                          library itself; that breaks it.",
+                    tool: None,
+                },
+            });
+        }
+    }
+}
+
+/// A folder the app that owns it should clean up, explained if it's at least
+/// `min` on disk.
+#[cfg(target_os = "macos")]
+fn explain_folder(out: &mut Vec<Suggestion>, tree: &Tree, path: &str, min: u64, title: &str, detail: &'static str, how: &'static str) {
+    if let Some(f) = tree.find(path)
+        && tree.node(f).alloc >= min
+    {
+        out.push(Suggestion {
+            title: title.to_string(),
+            detail,
+            bytes: tree.node(f).alloc,
+            items: vec![f],
+            action: Action::Explain { how, tool: None },
+        });
+    }
+}
+
+/// Time Machine's local snapshots on the startup disk, which a scan can't
+/// see. Runs `tmutil`, so call it off the UI thread, and only for a scan of
+/// this Mac (not the demo disk).
+pub fn local_snapshots(root: &str) -> Option<Suggestion> {
+    #[cfg(target_os = "macos")]
+    {
+        let startup = root == "/" || root == "/System/Volumes/Data" || crate::platform::home_dir().as_deref() == Some(root);
+        if !startup {
+            return None;
+        }
+        let out = std::process::Command::new("/usr/bin/tmutil").args(["listlocalsnapshots", "/"]).output().ok()?;
+        let n = count_snapshots(&String::from_utf8_lossy(&out.stdout));
+        (n > 0).then(|| Suggestion {
+            title: format!("{n} Time Machine snapshot{} on this disk", plural(n)),
+            detail: "Time Machine keeps hourly snapshots on the Mac itself, so you can get files back even without the \
+                     backup disk. The space they take doesn't show up in a scan.",
+            bytes: 0,
+            items: Vec::new(),
+            action: Action::Explain {
+                how: "macOS deletes them by itself after a day, or sooner when the disk runs low, so they rarely need \
+                      attention. To remove them now, run `sudo tmutil deletelocalsnapshots /` in Terminal. Backups on \
+                      your Time Machine disk aren't affected.",
+                tool: None,
+            },
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = root;
+        None
+    }
+}
+
+/// Big iCloud Drive files that are also downloaded to this Mac and haven't
+/// changed in a month. Their downloads can be removed without deleting
+/// anything. Asks iCloud about each candidate, so call it off the UI thread,
+/// and only for a scan of this Mac.
+#[cfg(target_os = "macos")]
+pub fn icloud_downloads(tree: &Tree, now: i64) -> Option<Suggestion> {
+    use crate::mac::icloud::{self, State};
+    let home = crate::platform::home_dir()?;
+    let mut candidates = Vec::new();
+    let mut stack = vec![ROOT];
+    while let Some(id) = stack.pop() {
+        for &c in tree.children(id) {
+            let n = tree.node(c);
+            if n.flags & (flags::CLOUD | flags::LINK | flags::HARDLINK | flags::DELETED | flags::MOUNT | flags::SEEN) != 0 {
+                continue;
+            }
+            if n.is_dir() {
+                stack.push(c);
+            } else if n.alloc >= 25 * MB && n.mtime > 0 && n.mtime < now - 30 * DAY {
+                candidates.push(c);
+            }
+        }
+    }
+    // Asking iCloud takes a moment per file, so only the biggest few hundred.
+    candidates.sort_by_key(|&c| std::cmp::Reverse(tree.node(c).alloc));
+    candidates.truncate(400);
+    let home = std::path::Path::new(&home);
+    let items: Vec<NodeId> = candidates
+        .into_iter()
         .filter(|&c| {
-            let worth: u64 = tree
-                .files_under(c)
-                .into_iter()
-                .filter(|&f| crate::compress::worth_trying(tree.ext_name(f), tree.node(f).size))
-                .map(|f| tree.node(f).alloc)
-                .sum();
-            worth * 2 >= tree.node(c).alloc
+            let path = tree.path(c);
+            let path = std::path::Path::new(&path);
+            path.starts_with(home) && icloud::state(path) == State::Downloaded
         })
         .collect();
-    out.sort_by_key(|&c| std::cmp::Reverse(tree.node(c).alloc));
-    out.truncate(20);
-    out
+    let bytes: u64 = items.iter().map(|&c| tree.node(c).alloc).sum();
+    (bytes >= 100 * MB).then(|| Suggestion {
+        title: format!("{} big iCloud Drive file{} kept on this Mac", items.len(), plural(items.len())),
+        detail: "These are also in iCloud. Removing the download frees the space here, as Finder's Remove Download does: \
+                 each file stays in iCloud Drive and in its folder, and downloads again when you open it, which needs an \
+                 internet connection. With Optimize Mac Storage on in iCloud Drive's settings, macOS does this by itself \
+                 when space runs low.",
+        bytes,
+        items,
+        action: Action::RemoveDownload,
+    })
+}
+
+/// Count the Time Machine snapshots in `tmutil listlocalsnapshots` output.
+#[cfg(target_os = "macos")]
+fn count_snapshots(text: &str) -> usize {
+    text.lines().filter(|l| l.trim().starts_with("com.apple.TimeMachine.")).count()
 }
 
 /// Temporary files and caches the Cleaner's default rules would remove,
@@ -464,8 +818,20 @@ const EMPTY_TRASH: &str = "Right-click the Trash in the Dock and choose Empty Tr
 #[cfg(all(unix, not(target_os = "macos")))]
 const EMPTY_TRASH: &str = "Open the Trash in your file manager and choose Empty.";
 
+#[cfg(not(target_os = "macos"))]
+const VDISK_DETAIL: &str = "WSL, Docker and virtual machine disks grow as you use them but don't shrink by themselves \
+                            when you delete files inside.";
+#[cfg(target_os = "macos")]
+const VDISK_DETAIL: &str = "Virtual machine disks grow as you use them but don't shrink by themselves when you delete \
+                            files inside.";
+
+#[cfg(not(target_os = "macos"))]
 const SHRINK_VDISK: &str = "For WSL, run `wsl --shutdown`, then compact the disk (on Windows, Heft's Cleaner page can \
                             do this). For virtual machines, use the VM software's compact or shrink option.";
+#[cfg(target_os = "macos")]
+const SHRINK_VDISK: &str = "Delete what you don't need inside the virtual machine first, then use the VM app's own \
+                            option to reclaim or compact its disk: Parallels Desktop and VMware Fusion have one in the \
+                            virtual machine's settings, and for VirtualBox it's `VBoxManage modifymedium --compact`.";
 
 /// (name at the top of the scan, title, detail, how, tool)
 #[cfg(windows)]
@@ -509,6 +875,28 @@ fn trash_folder(tree: &Tree) -> Option<NodeId> {
 mod tests {
     use super::*;
     use crate::tree::tests::root;
+
+    /// Read-only: scans your iCloud Drive and lists what the suggestion
+    /// would offer. Run with `--ignored --nocapture` to see.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn icloud_drive_suggestion() {
+        let home = crate::platform::home_dir().unwrap();
+        let drive = format!("{home}/Library/Mobile Documents/com~apple~CloudDocs");
+        let p = crate::scan::Progress::default();
+        let crate::scan::ScanOutcome::Done(tree, _) = crate::scan::run(&drive, false, &p) else { panic!("scan failed") };
+        let s = icloud_downloads(&tree, crate::platform::now_unix());
+        match &s {
+            Some(s) => {
+                eprintln!("{} ({} bytes)", s.title, s.bytes);
+                for &id in &s.items {
+                    eprintln!("  {}  {}", tree.node(id).alloc, tree.path(id));
+                }
+            }
+            None => eprintln!("no suggestion"),
+        }
+    }
     use crate::tree::{ScanInfo, ScanMode, TreeBuilder};
 
     const NOW: i64 = 2_000_000_000;
@@ -562,6 +950,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn compression_candidates() {
         let mut b = TreeBuilder::new(root());
         let pf = b.add(ROOT, "Program Files", flags::DIR, 0, 0, 0);
@@ -580,7 +969,125 @@ mod tests {
         b.add(game, "assets.pak", 0, 3 * GB, 3 * GB, NOW - 100 * DAY);
         let info = ScanInfo { mode: ScanMode::Walk, duration_ms: 0, finished_at: 0, unreadable_dirs: 0, note: None, phases: Vec::new() };
         let t = b.finish(root().into(), info);
-        let names: Vec<&str> = compress_candidates(&t, NOW).into_iter().map(|c| t.name(c)).collect();
+        let names: Vec<&str> = compress_candidates(&t, NOW, &[], &|_| true).into_iter().map(|c| t.name(c)).collect();
         assert_eq!(names, ["Some Game", "Old Tool"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn info() -> ScanInfo {
+        ScanInfo { mode: ScanMode::Walk, duration_ms: 0, finished_at: 0, unreadable_dirs: 0, note: None, phases: Vec::new() }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_compression_candidates() {
+        let mut b = TreeBuilder::new("/");
+        let apps = b.add(ROOT, "Applications", flags::DIR, 0, 0, 0);
+        let add_app = |b: &mut TreeBuilder, parent: NodeId, name: &str, ext: &str, mtime: i64| {
+            let app = b.add(parent, name, flags::DIR, 0, 0, 0);
+            let contents = b.add(app, "Contents", flags::DIR, 0, 0, 0);
+            b.add(contents, &format!("data.{ext}"), 0, 2 * GB, 2 * GB, mtime);
+        };
+        add_app(&mut b, apps, "Old Tool.app", "dylib", NOW - 200 * DAY);
+        add_app(&mut b, apps, "Fresh.app", "dylib", NOW - 7 * DAY);
+        add_app(&mut b, apps, "Store App.app", "dylib", NOW - 200 * DAY);
+        add_app(&mut b, apps, "Movie Samples.app", "mov", NOW - 200 * DAY);
+        let users = b.add(ROOT, "Users", flags::DIR, 0, 0, 0);
+        let ana = b.add(users, "ana", flags::DIR, 0, 0, 0);
+        let my_apps = b.add(ana, "Applications", flags::DIR, 0, 0, 0);
+        add_app(&mut b, my_apps, "Mine.app", "dylib", NOW - 100 * DAY);
+        let mut dir = ana;
+        for name in ["Library", "Application Support", "Steam", "steamapps", "common"] {
+            dir = b.add(dir, name, flags::DIR, 0, 0, 0);
+        }
+        add_app(&mut b, dir, "Some Game", "pak", NOW - 120 * DAY);
+        // Nothing outside the known places, however old.
+        let elsewhere = b.add(ana, "Projects", flags::DIR, 0, 0, 0);
+        add_app(&mut b, elsewhere, "Old Project", "o", NOW - 400 * DAY);
+        let t = b.finish("/".into(), info());
+
+        let steamapps: Vec<NodeId> = t.find("/Users/ana/Library/Application Support/Steam/steamapps").into_iter().collect();
+        // Belongs to root, as App Store apps do.
+        let yours = |p: &str| !p.ends_with("Store App.app");
+        let mut names: Vec<&str> = compress_candidates(&t, NOW, &steamapps, &yours).into_iter().map(|c| t.name(c)).collect();
+        names.sort();
+        assert_eq!(names, ["Mine.app", "Old Tool.app", "Some Game"]);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_items_are_found_and_explained() {
+        let mut b = TreeBuilder::new("/");
+        let apps = b.add(ROOT, "Applications", flags::DIR, 0, 0, 0);
+        let installer = b.add(apps, "Install macOS Sequoia.app", flags::DIR, 0, 0, 0);
+        b.add(installer, "SharedSupport.dmg", 0, 14 * GB, 14 * GB, NOW - 90 * DAY);
+        let stub = b.add(apps, "Install macOS Tahoe.app", flags::DIR, 0, 0, 0);
+        b.add(stub, "stub", 0, 20 * MB, 20 * MB, NOW);
+        let users = b.add(ROOT, "Users", flags::DIR, 0, 0, 0);
+        let ana = b.add(users, "ana", flags::DIR, 0, 0, 0);
+        let lib = b.add(ana, "Library", flags::DIR, 0, 0, 0);
+        let itunes = b.add(lib, "iTunes", flags::DIR, 0, 0, 0);
+        let updates = b.add(itunes, "iPhone Software Updates", flags::DIR, 0, 0, 0);
+        b.add(updates, "iPhone17,1_26.0_Restore.ipsw", 0, 9 * GB, 9 * GB, NOW - 30 * DAY);
+        let support = b.add(lib, "Application Support", flags::DIR, 0, 0, 0);
+        let sync = b.add(support, "MobileSync", flags::DIR, 0, 0, 0);
+        let backup = b.add(sync, "Backup", flags::DIR, 0, 0, 0);
+        let device = b.add(backup, "00008110-001A2B3C4D5E", flags::DIR, 0, 0, 0);
+        b.add(device, "Manifest.db", 0, 30 * GB, 30 * GB, NOW - 60 * DAY);
+        let mut dir = lib;
+        for name in ["Containers", "com.docker.docker", "Data", "vms", "0", "data"] {
+            dir = b.add(dir, name, flags::DIR, 0, 0, 0);
+        }
+        b.add(dir, "Docker.raw", 0, 64 * GB, 22 * GB, NOW);
+        let messages = b.add(lib, "Messages", flags::DIR, 0, 0, 0);
+        let attachments = b.add(messages, "Attachments", flags::DIR, 0, 0, 0);
+        b.add(attachments, "IMG_0001.heic", 0, 3 * GB, 3 * GB, NOW - 400 * DAY);
+        let mut dir = lib;
+        for name in ["Developer", "Xcode", "Archives", "2026-01-02"] {
+            dir = b.add(dir, name, flags::DIR, 0, 0, 0);
+        }
+        b.add(dir, "App.xcarchive", 0, 2 * GB, 2 * GB, NOW - 200 * DAY);
+        let mut dir = lib;
+        for name in ["Containers", "com.apple.mail", "Data", "Library", "Mail Downloads"] {
+            dir = b.add(dir, name, flags::DIR, 0, 0, 0);
+        }
+        b.add(dir, "small.pdf", 0, 10 * MB, 10 * MB, NOW);
+        let pictures = b.add(ana, "Pictures", flags::DIR, 0, 0, 0);
+        let photos = b.add(pictures, "Photos Library.photoslibrary", flags::DIR, 0, 0, 0);
+        b.add(photos, "originals.db", 0, 40 * GB, 40 * GB, NOW);
+        let private = b.add(ROOT, "private", flags::DIR, 0, 0, 0);
+        let var = b.add(private, "var", flags::DIR, 0, 0, 0);
+        let vm = b.add(var, "vm", flags::DIR, 0, 0, 0);
+        b.add(vm, "sleepimage", 0, 2 * GB, 2 * GB, NOW);
+        let t = b.finish("/".into(), info());
+
+        let s = analyze(&t, NOW);
+        let find = |title: &str| s.iter().find(|x| x.title == title).unwrap_or_else(|| panic!("no {title}: {s:?}"));
+        let names = |x: &Suggestion| x.items.iter().map(|&i| t.name(i).to_string()).collect::<Vec<_>>();
+
+        let installers = find("Old macOS installers");
+        assert_eq!(names(installers), ["Install macOS Sequoia.app"], "the small stub is left out");
+        assert!(matches!(installers.action, Action::Trash { preselect: false }));
+        let ipsw = find("iPhone and iPad software downloads");
+        assert_eq!(names(ipsw), ["iPhone17,1_26.0_Restore.ipsw"]);
+        assert!(matches!(ipsw.action, Action::Trash { preselect: true }));
+        assert!(risk::assess(&t, ipsw.items[0]).is_none(), "pre-selected, so nothing to warn about");
+        // Backups, the hibernation image and Docker's disk are only explained.
+        for title in ["iPhone and iPad backups", "Hibernation image", "Docker Desktop's disk", "Messages attachments", "Xcode archives", "Photos library"] {
+            assert!(matches!(find(title).action, Action::Explain { .. }), "{title}");
+        }
+        assert!(!s.iter().any(|x| x.title == "Mail downloads"), "too small to mention");
+        assert_eq!(find("Photos library").bytes, 40 * GB);
+        assert_eq!(find("Docker Desktop's disk").bytes, 22 * GB, "space on disk, not the sparse file's size");
+        assert_eq!(names(find("iPhone and iPad backups")), ["Backup"]);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn snapshot_list() {
+        let text = "Snapshots for disk /:\ncom.apple.TimeMachine.2026-09-29-101502.local\n\
+                    com.apple.TimeMachine.2026-09-29-111503.local\ncom.apple.os.update-ABCDEF\n";
+        assert_eq!(count_snapshots(text), 2);
+        assert_eq!(count_snapshots("Snapshots for disk /:\n"), 0);
     }
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for a Developer ID signature with the hardened runtime
+  (scripts/bundle-macos.sh with HEFT_SIGN_IDENTITY set). Heft isn't
+  sandboxed; the hardened runtime only needs to be told that Heft sends
+  Apple Events (System Events for login items, Finder for Put Back), or
+  macOS refuses them without asking.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

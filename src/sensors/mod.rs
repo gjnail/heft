@@ -7,6 +7,8 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod mac;
 #[cfg(windows)]
 mod win;
 
@@ -31,6 +33,7 @@ pub enum Class {
     Network,
     Battery,
     /// ACPI thermal zones and anything else that isn't clearly one device.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Other,
 }
 
@@ -40,6 +43,8 @@ impl Class {
             Class::Cpu => "Processor",
             Class::Gpu => "Graphics",
             Class::Memory => "Memory",
+            // What Apple calls it.
+            Class::Motherboard if cfg!(target_os = "macos") => "Logic board",
             Class::Motherboard => "Motherboard",
             Class::Storage => "Drive",
             Class::Network => "Network",
@@ -626,6 +631,10 @@ fn run(sh: &Shared, on_sample: impl Fn()) {
     }
 }
 
+/// The Mac, chip and raw sensor data for `heft --sensors --report`.
+#[cfg(target_os = "macos")]
+pub use mac::{report_raw, report_system};
+
 /// Read every sensor `rounds` times, `interval` apart, on this thread. For
 /// the command line.
 pub fn collect(rounds: u32, interval: Duration) -> Snapshot {
@@ -651,12 +660,15 @@ pub fn collect(rounds: u32, interval: Duration) -> Snapshot {
     snap
 }
 
-/// This module is only built on Windows and Linux; macOS has no backend yet.
 fn sources() -> (Vec<Box<dyn Source>>, Driver) {
     #[cfg(windows)]
     return win::sources();
     #[cfg(target_os = "linux")]
     return (linux::sources(), Driver::NotNeeded);
+    #[cfg(target_os = "macos")]
+    return (mac::sources(), Driver::NotNeeded);
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    return (Vec::new(), Driver::NotNeeded);
 }
 
 // ----------------------------------------------------------------------

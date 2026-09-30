@@ -1,5 +1,6 @@
 //! Low-space alerts: a banner in the window, the settings in the View menu,
-//! and on Windows, staying in the notification area after the window closes.
+//! and on Windows and macOS, staying in the notification area or the menu bar
+//! after the window closes.
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -18,10 +19,12 @@ pub(super) struct AlertState {
     rx: Receiver<Vec<Low>>,
     low: Vec<Low>,
     dismissed: HashSet<String>,
-    /// Keep running in the notification area when the window is closed.
+    /// Keep running in the notification area (the menu bar on macOS) when
+    /// the window is closed.
     pub background: bool,
-    /// Started with Windows (`--tray`): hide the window as soon as it opens.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Started with Windows or at login (`--tray`): hide the window as soon
+    /// as it opens.
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     start_hidden: bool,
 }
 
@@ -37,6 +40,14 @@ impl AlertState {
         #[cfg(all(windows, debug_assertions))]
         if std::env::var_os("HEFT_DEBUG_TRAY").is_some() {
             crate::tray::self_test();
+        }
+        #[cfg(target_os = "macos")]
+        if background {
+            crate::mac::menubar::start();
+        }
+        #[cfg(all(target_os = "macos", debug_assertions))]
+        if std::env::var_os("HEFT_DEBUG_TRAY").is_some() {
+            crate::mac::menubar::self_test();
         }
         AlertState { settings, rx, low: Vec::new(), dismissed: HashSet::new(), background, start_hidden }
     }
@@ -82,7 +93,31 @@ impl HeftApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            use crate::mac::menubar;
+            // The icon is made on this thread, so it's already there; eframe
+            // shows the window after this first frame and then hides it again.
+            if std::mem::take(&mut self.alerts.start_hidden) {
+                if menubar::running() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    menubar::hide_window();
+                } else {
+                    menubar::show_window();
+                }
+            }
+            if menubar::take_shown() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            // Cmd-Q and Quit Heft end the app without asking the window.
+            if self.alerts.background && menubar::running() && ctx.input(|i| i.viewport().close_requested()) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                menubar::hide_window();
+            }
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
         let _ = ctx;
     }
 
@@ -167,6 +202,33 @@ impl HeftApp {
                     }
                     Ok(()) => {}
                     Err(e) => self.toast(format!("Couldn't change the startup setting: {e}"), true),
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            use crate::mac::menubar;
+            let before = self.alerts.background;
+            ui.checkbox(&mut self.alerts.background, "Keep watching in the menu bar after closing")
+                .on_hover_text("Closing the window hides Heft in the menu bar. Click its icon there to open Heft again or to quit.");
+            if self.alerts.background != before {
+                if self.alerts.background { menubar::start() } else { menubar::stop() }
+            }
+            let mut login = menubar::starts_at_login();
+            if ui
+                .checkbox(&mut login, "Start at login, in the menu bar")
+                .on_hover_text("Heft starts hidden when you log in and only speaks up when a drive is almost full.")
+                .changed()
+            {
+                match menubar::set_start_at_login(login) {
+                    Ok(()) if login => {
+                        self.alerts.background = true;
+                        menubar::start();
+                        s.enabled.store(true, Ordering::Relaxed);
+                    }
+                    Ok(()) => {}
+                    Err(e) => self.toast(format!("Couldn't change the login setting: {e}"), true),
                 }
             }
         }

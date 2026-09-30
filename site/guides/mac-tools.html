@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login items, apps and broken items · Heft</title>
+  <meta name="description" content="Use Heft on a Mac to turn off login items and launch agents, uninstall apps and clear their leftovers, update apps through Homebrew, and remove broken entries with backups.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="../images/favicon-32.png" type="image/png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="../index.html"><img src="../images/icon-64.png" alt="" width="28" height="28">Heft</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="../tutorial.html">Tutorial</a>
+      <a href="index.html" aria-current="page">Guides</a>
+      <a href="../faq.html">FAQ</a>
+      <a href="https://github.com/gjnail/heft">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/gjnail/heft/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <aside class="sidebar" aria-label="Documentation">
+    <h2>Start here</h2>
+    <ul>
+      <li><a href="../tutorial.html">Tutorial</a></li>
+      <li><a href="../faq.html">FAQ and troubleshooting</a></li>
+    </ul>
+    <h2>Guides</h2>
+    <ul>
+      <li><a href="disk-usage.html">Finding what uses space</a></li>
+      <li><a href="cleaning-up.html">Cleaning up safely</a></li>
+      <li><a href="duplicates.html">Duplicates and saving space</a></li>
+      <li><a href="cleaner.html">The Cleaner</a></li>
+      <li><a href="hardware.html">Hardware monitor</a></li>
+      <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html" aria-current="page">Login items, apps, broken items</a></li>
+      <li><a href="alerts.html">Free space alerts</a></li>
+      <li><a href="command-line.html">Command line</a></li>
+    </ul>
+  </aside>
+
+  <main id="main" class="prose">
+    <p class="breadcrumb"><a href="index.html">Guides</a></p>
+    <h1>Login items, apps and broken items</h1>
+    <span class="platforms">macOS</span>
+    <p class="lede">Three maintenance pages for the Mac: what starts when you sign in or when the Mac starts, what's installed, and entries that point at apps and files that are gone.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul>
+        <li><a href="#login-items">Login items</a></li>
+        <li><a href="#apps">Apps</a></li>
+        <li><a href="#updates">Updating apps</a></li>
+        <li><a href="#broken">Broken items</a></li>
+        <li><a href="#backups">Backups</a></li>
+      </ul>
+    </nav>
+    <p>Heft doesn't need to run as administrator on a Mac. Anything that changes files outside your home folder, such as launch daemons and items installed for all users, asks for your administrator password when you do it, once for everything you chose. Each page says so before it asks.</p>
+    <p>On Windows, the Startup, Programs and Registry pages do the same jobs. See <a href="windows-tools.html">Startup, programs and registry</a>.</p>
+
+    <h2 id="login-items">Login items</h2>
+    <p>The <strong>Login items</strong> page lists everything that starts when you sign in or when the Mac starts: your login items, and launch agents and daemons in <code>~/Library/LaunchAgents</code>, <code>/Library/LaunchAgents</code> and <code>/Library/LaunchDaemons</code>. Each row shows the item, who signed it, the command it runs, whether it's running now, and how it starts: at login, at startup, kept running, on a schedule or on demand. Use <strong>Filter</strong> to find one.</p>
+    <ul>
+      <li><strong>Turn an item off</strong> with its checkbox. For launch agents and daemons this uses launchd's own switch (<code>launchctl disable</code>), so nothing is deleted and you can turn it back on any time. A login item is taken off the list, but Heft remembers it, so ticking it again adds it back as it was.</li>
+      <li><strong>Remove an item</strong> for good with the bin button. Heft saves a backup first. Your own launch agents go to the Trash, and ones in <code>/Library</code> are deleted after the backup, which asks for your administrator password. Removing a login item doesn't touch the app itself.</li>
+    </ul>
+    <p>Turning something off takes effect the next time you sign in or restart; nothing that's running is stopped. Removing a launch agent or daemon also stops it if it's running. Turning launch daemons on or off, and removing items installed for all users, asks for your administrator password.</p>
+    <p>Apps can also carry helpers inside them and switch them on themselves. These are listed under <strong>Background items inside apps</strong> for reference, with the ones that are active right now. Turn them on or off in System Settings › General › Login Items &amp; Extensions; <strong>Open Login Items settings</strong> takes you there. Those switches are separate from Heft's: an item turned off there stays off.</p>
+    <p><strong>Show all background items</strong> reads macOS's own list: everything System Settings shows under Login Items &amp; Extensions, for every user on the Mac, with who made it and whether it's allowed to run in the background. Only an administrator can read that list, so it asks for your password. macOS doesn't let other apps switch these items, so use System Settings for that.</p>
+    <p>Heft reads your login items without asking for any permission. If that ever stops working, it offers to read them through System Events instead, which macOS asks you to allow the first time (System Settings › Privacy &amp; Security › Automation).</p>
+
+    <h2 id="apps">Apps</h2>
+    <p>The <strong>Apps</strong> page lists every app in Applications and <code>~/Applications</code>, including apps in vendor folders such as <code>Adobe Photoshop 2026</code>, with the space it really takes on disk. A size with a <strong>~</strong> in front comes from Spotlight and is replaced once Heft has measured the app. Each row also shows the publisher from the app's code signature, when it was added and when it was last opened. Search by name, publisher or bundle ID, and sort by size, name, date added, least recently opened or publisher.</p>
+    <p>Apps that come with macOS aren't listed: they're part of the system and update with it.</p>
+    <p><strong>To uninstall an app:</strong></p>
+    <ol>
+      <li>Quit the app. Heft won't uninstall an app that's running; it says so and offers <strong>Check again</strong>.</li>
+      <li>Press <strong>Uninstall</strong>. If the app comes with its own uninstaller, Heft offers <strong>Open its uninstaller</strong>, which can also remove the helpers and settings the app installed. If Homebrew installed it, <strong>Uninstall with Homebrew</strong> runs the cask's own uninstall steps in a Terminal window. Otherwise Heft moves the app to the Trash, and you can always choose <strong>Move to Trash instead</strong>. Apps installed for all users ask for your administrator password.</li>
+      <li>Heft then checks <code>~/Library</code> and <code>/Library</code> for settings, caches and other files the app left behind, and lists them.</li>
+      <li>Tick what to remove and press <strong>Move to the Trash</strong>, or <strong>Keep everything</strong>.</li>
+    </ol>
+    <p>Leftover suggestions never include anything another installed app uses. Only items named exactly after the app's bundle ID are ticked; items that just share the app's name are listed unticked, so you can check them first. Everything Heft moves, the app and its leftovers, shows up on the <a href="cleaning-up.html#removed">Removed tab</a> and can be put back.</p>
+    <h3 id="deleted-apps">Leftovers of deleted apps</h3>
+    <p>Apps dragged to the Trash, or removed long ago, leave their data behind in <code>~/Library</code>. <strong>Leftovers of deleted apps</strong> lists it by app: an app's data container in <code>~/Library/Containers</code>, and its caches, preferences, saved window state and other files named after the same bundle ID. This is often the biggest win on a Mac that's been in use for years.</p>
+    <p>Since there's no uninstall to go by, the rules are strict:</p>
+    <ul>
+      <li>A bundle ID only counts as an app's when it has a data container or saved window state, or macOS still remembers an app with that ID whose bundle is gone.</li>
+      <li>It's only listed when no app on the Mac has that ID or belongs to it: not the apps macOS knows anywhere (including on disks that aren't connected), not the extensions and helpers inside them, and nothing that's running.</li>
+      <li>Items are only matched by bundle ID, never by name, and Apple's own and shared group containers are never listed.</li>
+    </ul>
+    <p>Nothing is ticked, so look at each one first. Without Full Disk Access, macOS doesn't let Heft measure other apps' data containers, so their size shows as <strong>size?</strong>, and it may refuse to move them.</p>
+    <p>The menu button on each row can <strong>Show in Finder</strong>, <strong>Show in disk map</strong> (scan the app on the Disk usage page), <strong>Copy path</strong> or <strong>Copy bundle ID</strong>.</p>
+
+    <h2 id="updates">Updating apps</h2>
+    <p>Press <strong>Check for updates</strong> and Heft asks <a href="https://brew.sh">Homebrew</a>, the Mac's counterpart of winget, which apps and command-line packages have newer versions. Each one gets an <strong>Update</strong> button, and <strong>Update all</strong> updates everything at once after asking. Packages you've pinned in Homebrew are left alone until you unpin them with <code>brew unpin</code>.</p>
+    <p>Updates run in a Terminal window so you can see what Homebrew does and answer its questions. Checking for and installing updates is the only time Heft uses the network.</p>
+    <p>Homebrew can only update what it installed. If Homebrew isn't on your Mac, the page says so and links to <a href="https://brew.sh">brew.sh</a>. macOS updates in Software Update; the page has a shortcut to it.</p>
+    <p><strong>App Store apps</strong> are included when the <code>mas</code> tool is installed (<code>brew install mas</code>): they're listed with the other updates, and <strong>Update</strong> runs <code>mas upgrade</code> in Terminal. Without it, the page has a shortcut to the App Store's Updates.</p>
+    <p><strong>Apps that update themselves</strong>, with Sparkle (which many Mac apps use) or Squirrel (Electron apps), say <strong>updates itself</strong>, and their menu has <strong>Open to update</strong>. Heft doesn't go online for them unless you ask: turn on <strong>Also ask apps that update themselves</strong> in Settings (<kbd>Cmd</kbd>-<kbd>,</kbd>), and Check for updates also asks each Sparkle app's own update server, at the address inside the app, whether there's a newer version.</p>
+
+    <h2 id="broken">Broken items</h2>
+    <p>Removing broken entries doesn't make a Mac faster, whatever anyone claims. The <strong>Broken items</strong> page is the Mac counterpart of the registry check: housekeeping, and deliberately narrow. Press <strong>Scan for issues</strong> to look for entries that point at apps and files that no longer exist:</p>
+    <ul>
+      <li>launch agents and daemons whose program is gone (macOS tries and fails to start them at every login or startup);</li>
+      <li>login items whose app is gone;</li>
+      <li>Dock icons for apps and folders that are gone, which the Dock shows with a question mark (an app that was only moved still counts as there, since the Dock follows it);</li>
+      <li>command-line links in <code>/usr/local/bin</code>, <code>~/.local/bin</code> and <code>~/bin</code> whose target is gone (links that Homebrew, MacPorts or Nix manage are left to them);</li>
+      <li>"Open With" entries for apps that are no longer there;</li>
+      <li>package receipts for software whose files are all gone.</li>
+    </ul>
+    <p>Only the first three are ticked, because they have a visible effect: macOS stops trying to start something that isn't there, and the question marks leave the Dock. The rest are harmless clutter, listed for you to decide.</p>
+    <p>An entry only counts as broken when what it names is provably gone. Disks that aren't connected and folders Heft can't look in never count. Press <strong>Fix selected</strong> and Heft lists what will happen to each kind of entry before anything changes:</p>
+    <ul>
+      <li>launch agents and daemons are stopped if they're loaded, and their <code>.plist</code> goes to the Trash (or is deleted, for ones in <code>/Library</code>);</li>
+      <li>login items are taken off the list;</li>
+      <li>Dock icons are taken out of the Dock, which then restarts;</li>
+      <li>links are deleted;</li>
+      <li>Open With entries are unregistered from Launch Services;</li>
+      <li>package receipts are forgotten with <code>pkgutil</code>, and no installed files are touched.</li>
+    </ul>
+    <p>Press <strong>Back up and fix</strong> and Heft saves a backup, then makes the changes. Anything outside your home folder asks for your administrator password, once for all of them.</p>
+
+    <h2 id="backups">Backups</h2>
+    <p>Everything Heft removes or changes on the Login items and Broken items pages is saved first in <code>~/Library/Application Support/Heft/backups</code>. The <strong>Backups</strong> list at the bottom of the Broken items page shows them all. Press <strong>Restore…</strong> next to one to see what can be put back, then <strong>Restore</strong>, or <strong>Open folder</strong> to see the files. Items outside your home folder need your administrator password to restore, and launch agents and daemons load again the next time you sign in or restart.</p>
+    <p>The login items you turned off are remembered in <code>login-items-off.plist</code>, in <code>~/Library/Application Support/Heft</code>, so Heft can add them back as they were.</p>
+
+    <div class="pager">
+      <a href="windows-tools.html"><small>Previous</small>Startup, programs and registry</a>
+      <a class="next" href="alerts.html"><small>Next</small>Free space alerts</a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>Heft is free and open source under the MIT license. This site has no analytics or cookies.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gjnail/heft">Source code</a>
+      <a href="https://github.com/gjnail/heft/releases">Releases</a>
+      <a href="https://github.com/gjnail/heft/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gjnail/heft/issues">Report a problem</a>
+      <a href="https://ko-fi.com/gnail">Support on Ko-fi</a>
+    </nav>
+  </div>
+</footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

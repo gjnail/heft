@@ -126,5 +126,87 @@ and update "The first time you open it" in the README to match what Windows
 shows. SmartScreen goes by the reputation of the certificate and the file, so
 a signed exe can still get a warning, just much less often.
 
-The macOS download is still unsigned. Signing and notarizing it needs a paid
-Apple Developer account.
+## Signing and notarizing for macOS
+
+A Developer ID signature and Apple's notarization stop macOS saying it can't
+verify Heft. They also give every release the same code identity, so macOS
+keeps Full Disk Access, Notification Center permission and App Management
+permission across updates instead of asking again after each one, and
+notifications from Heft.app work reliably.
+
+Until the steps below are done, the workflow signs the app ad hoc, as a local
+build does.
+
+### One-time setup
+
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/)
+   ($99 a year). An individual account is fine.
+2. Create a **Developer ID Application** certificate: in Xcode, Settings >
+   Accounts > Manage Certificates > + > Developer ID Application (only the
+   account holder can do this). In Keychain Access, export it with its
+   private key as a `.p12` file with a password.
+3. Create an App Store Connect API key for notarization: App Store Connect >
+   Users and Access > Integrations > App Store Connect API > +, with the
+   **Developer** role. Download the `.p8` file (it can only be downloaded
+   once) and note the key ID and the issuer ID above the list.
+4. In this repository, under Settings > Secrets and variables > Actions:
+   - secret `MACOS_CERTIFICATE`: the `.p12` file as base64
+     (`base64 -i heft.p12 | pbcopy`);
+   - secret `MACOS_CERTIFICATE_PASSWORD`: its password;
+   - secret `APPLE_API_KEY`: the contents of the `.p8` file;
+   - variable `APPLE_API_KEY_ID`: the key ID;
+   - variable `APPLE_API_ISSUER_ID`: the issuer ID;
+   - variable `APPLE_TEAM_ID`: your team ID (Membership details on
+     developer.apple.com). Setting this one turns signing on.
+5. Run the Release workflow by hand and check the macOS job's Notarize step.
+   Download the zip from the run and open it on a Mac that has never run
+   Heft: it should open without the "can't verify" warning.
+
+To sign a local build the same way, pass the certificate's name from your
+keychain:
+
+```
+HEFT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/bundle-macos.sh
+```
+
+The app is signed with the hardened runtime and the entitlements in
+[`packaging/macos/heft.entitlements`](../packaging/macos/heft.entitlements).
+If a feature that talks to another app stops working in a signed build, check
+that file first.
+
+### With signing on
+
+Nothing changes in the release steps: the macOS job signs, notarizes (usually
+a few minutes) and staples the ticket to the app before zipping it. Once the
+first signed release is out, update "The first time you open it" in the
+README and the macOS notes on the website.
+
+## Homebrew
+
+The macOS job writes a cask, `heft.rb`, and attaches it to the run as the
+`homebrew-cask` artifact. It points at the release URL, so use it only after
+the release is published. It installs Heft.app and links `heft` into
+Homebrew's `bin` folder, so the command line works too.
+
+Until Heft is in Homebrew itself, publish the cask in a tap of your own: a
+repository called `homebrew-heft` with the file at `Casks/heft.rb`. People
+then install with:
+
+```
+brew install --cask gjnail/heft/heft
+```
+
+Check the cask before pushing it:
+
+```
+brew style --fix Casks/heft.rb
+brew audit --cask --new gjnail/heft/heft
+brew install --cask gjnail/heft/heft
+```
+
+For plain `brew install --cask heft`, the cask has to go into
+[Homebrew/homebrew-cask](https://github.com/Homebrew/homebrew-cask), whose
+rules require a signed and notarized app and a reasonably well-known
+project (see their [acceptable casks](https://docs.brew.sh/Acceptable-Casks)
+page). Open a pull request adding `Casks/h/heft.rb`. After that, Homebrew's
+autobump updates it for each new release, so it only needs doing once.

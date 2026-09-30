@@ -108,7 +108,9 @@ pub fn list_drives() -> Vec<DriveInfo> {
     let mut out: Vec<DriveInfo> = Vec::new();
     let mut seen_devices = std::collections::HashSet::new();
     for m in mounts() {
-        if is_virtual_fs(&m.fs) || m.snapshot {
+        // Since macOS 11 the startup disk itself is mounted from a snapshot
+        // of the sealed system volume.
+        if is_virtual_fs(&m.fs) || (m.snapshot && m.point != "/") {
             continue;
         }
         let p = m.point.as_str();
@@ -139,10 +141,35 @@ pub fn list_drives() -> Vec<DriveInfo> {
         } else {
             "Local disk"
         };
-        out.push(DriveInfo { root: m.point.clone(), label, fs: m.fs.clone(), kind, total, free });
+        let purgeable = if network { 0 } else { super::purgeable_space(p, free) };
+        out.push(DriveInfo { root: m.point.clone(), label, fs: m.fs.clone(), kind, total, free, purgeable });
     }
     out.sort_by(|a, b| (a.root != "/").cmp(&(b.root != "/")).then(a.root.cmp(&b.root)));
     out
+}
+
+/// Finder's "available": free space plus what macOS can purge for
+/// something important, like an app installing, less the `free` space
+/// statfs reported. macOS works this out itself, which can take a moment
+/// the first time.
+#[cfg(target_os = "macos")]
+pub fn purgeable_space(path: &str, free: u64) -> u64 {
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSString, NSURL};
+    objc2::rc::autoreleasepool(|_| {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
+        let key = NSString::from_str("NSURLVolumeAvailableCapacityForImportantUsageKey");
+        let mut value: *mut AnyObject = std::ptr::null_mut();
+        let ok: bool = unsafe {
+            objc2::msg_send![&url, getResourceValue: &mut value, forKey: &*key, error: std::ptr::null_mut::<*mut AnyObject>()]
+        };
+        if !ok || value.is_null() {
+            return 0;
+        }
+        // An NSNumber.
+        let available: i64 = unsafe { objc2::msg_send![value, longLongValue] };
+        (available.max(0) as u64).saturating_sub(free)
+    })
 }
 
 /// (total bytes, bytes available to the caller) of the file system holding `path`.
@@ -234,6 +261,88 @@ fn percent_encode(path: &str) -> String {
     out
 }
 
+/// Move items to the Trash through Finder, so Finder's Put Back works for
+/// them too (a setting; off unless chosen).
+#[cfg(target_os = "macos")]
+static THROUGH_FINDER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Why Finder last couldn't move something, for the Settings page.
+#[cfg(target_os = "macos")]
+static FINDER_REFUSED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+pub fn set_trash_through_finder(on: bool) {
+    THROUGH_FINDER.store(on, std::sync::atomic::Ordering::Relaxed);
+    *FINDER_REFUSED.lock().unwrap() = None;
+}
+
+#[cfg(target_os = "macos")]
+pub fn trash_through_finder() -> bool {
+    THROUGH_FINDER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Why Finder didn't move the last item it was asked to, if it didn't.
+#[cfg(target_os = "macos")]
+pub fn finder_refused() -> Option<String> {
+    FINDER_REFUSED.lock().unwrap().clone()
+}
+
+/// Move `path` to the Trash and return where it ended up. Normally with the
+/// system's file manager API, which needs no permission. With the setting
+/// on, Finder does it instead, so Finder's Put Back works as well as Heft's
+/// own restore; macOS asks once to let Heft control Finder. Only items on
+/// the home folder's disk that Heft could move itself go through Finder:
+/// elsewhere Finder might offer to delete right away, or ask for a password
+/// in its own window. If Finder won't, the usual way is used.
+#[cfg(target_os = "macos")]
+pub fn move_to_trash(path: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
+    if trash_through_finder() && finder_can_take(path) {
+        match crate::mac::osascript(&finder_trash_script(path)) {
+            Ok(landed) => {
+                let landed = landed.trim().trim_end_matches('/');
+                return Ok((!landed.is_empty()).then(|| std::path::PathBuf::from(landed)));
+            }
+            Err(e) if std::fs::symlink_metadata(path).is_err() => return Err(e),
+            Err(e) => *FINDER_REFUSED.lock().unwrap() = Some(e),
+        }
+    }
+    trash_with_file_manager(path)
+}
+
+/// On the home folder's disk, in a folder Heft can write to.
+#[cfg(target_os = "macos")]
+fn finder_can_take(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Some(home), Some(parent)) = (super::home_dir(), path.parent()) else { return false };
+    let dev = |p: &std::path::Path| std::fs::symlink_metadata(p).ok().map(|m| m.dev());
+    let writable = CString::new(parent.as_os_str().as_encoded_bytes())
+        .is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0);
+    writable && dev(path).is_some() && dev(path) == dev(std::path::Path::new(&home))
+}
+
+/// Finder moves the item to the Trash and says where it put it.
+#[cfg(target_os = "macos")]
+fn finder_trash_script(path: &std::path::Path) -> String {
+    format!(
+        "tell application \"Finder\"\nset t to delete (POSIX file {} as alias)\nreturn POSIX path of (t as alias)\nend tell",
+        crate::mac::applescript_quote(&path.to_string_lossy())
+    )
+}
+
+/// The system's file manager API: no Finder scripting, so no permission prompt.
+#[cfg(target_os = "macos")]
+fn trash_with_file_manager(path: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+    objc2::rc::autoreleasepool(|_| {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let mut landed = None;
+        NSFileManager::defaultManager()
+            .trashItemAtURL_resultingItemURL_error(&url, Some(&mut landed))
+            .map_err(|e| e.localizedDescription().to_string())?;
+        Ok(landed.and_then(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string())))
+    })
+}
+
 pub fn open_path(path: &str) {
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     let _ = std::process::Command::new(opener).arg(path).spawn();
@@ -263,4 +372,41 @@ pub fn local_time(unix: i64) -> Option<LocalTime> {
 /// are reported per item.
 pub fn is_network_path(_path: &str) -> bool {
     false
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn finder_script() {
+        let s = super::finder_trash_script(std::path::Path::new("/Users/x/My \"odd\" file.txt"));
+        assert_eq!(
+            s,
+            "tell application \"Finder\"\nset t to delete (POSIX file \"/Users/x/My \\\"odd\\\" file.txt\" as alias)\n\
+             return POSIX path of (t as alias)\nend tell"
+        );
+    }
+
+    /// Only items on the home folder's disk that Heft could move itself.
+    #[test]
+    fn what_finder_takes() {
+        let home = super::super::home_dir().unwrap();
+        let dir = std::path::Path::new(&home).join(format!(".heft-finder-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("f");
+        std::fs::write(&f, "x").unwrap();
+        assert!(super::finder_can_take(&f));
+        assert!(!super::finder_can_take(&dir.join("missing")));
+        assert!(!super::finder_can_take(std::path::Path::new("/System/Library/CoreServices/Finder.app")), "not writable");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Read-only: the startup disk's free and purgeable space.
+    #[test]
+    fn purgeable_space_on_the_startup_disk() {
+        let (total, free) = super::free_space("/").unwrap();
+        let started = std::time::Instant::now();
+        let purgeable = super::purgeable_space("/", free);
+        eprintln!("free {free}, purgeable {purgeable}, took {:?}", started.elapsed());
+        assert!(free + purgeable <= total);
+    }
 }

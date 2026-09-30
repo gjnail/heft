@@ -79,12 +79,17 @@ pub fn start(settings: Arc<Settings>, wake: impl Fn() + Send + 'static) -> Recei
                 if cfg!(debug_assertions) && std::env::var_os("HEFT_DEBUG_LOW").is_some() {
                     drives.iter_mut().for_each(|d| d.free = d.free.min(GB));
                 }
-                let (low, fresh) = assess(&drives, settings.limit.load(Ordering::Relaxed), &mut warned);
+                let limit = settings.limit.load(Ordering::Relaxed);
+                #[cfg(target_os = "macos")]
+                crate::mac::menubar::set_watched(Some((&drives, limit)));
+                let (low, fresh) = assess(&drives, limit, &mut warned);
                 for l in &fresh {
                     notify(l);
                 }
                 low
             } else {
+                #[cfg(target_os = "macos")]
+                crate::mac::menubar::set_watched(None);
                 warned.clear();
                 Vec::new()
             };
@@ -105,15 +110,7 @@ fn notify(l: &Low) {
     #[cfg(windows)]
     crate::tray::notify(&title, &body);
     #[cfg(target_os = "macos")]
-    {
-        let clean = |s: &str| s.replace(['"', '\\'], "");
-        let script = format!("display notification \"{}\" with title \"Heft\" subtitle \"{}\"", clean(&body), clean(&title));
-        let _ = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    }
+    crate::mac::notify::send(&title, &body);
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         let _ = std::process::Command::new("notify-send")
@@ -129,7 +126,7 @@ mod tests {
     use super::*;
 
     fn drive(root: &str, free: u64, total: u64) -> DriveInfo {
-        DriveInfo { root: root.into(), label: String::new(), fs: String::new(), kind: "Local disk", total, free }
+        DriveInfo { root: root.into(), label: String::new(), fs: String::new(), kind: "Local disk", total, free, purgeable: 0 }
     }
 
     #[test]

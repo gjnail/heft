@@ -6,8 +6,8 @@
 //!   heft --render <path> <out.png> [--size WxH] [--mode type|category|age] [--walk]
 //!   heft --icon <out.png> [--size N]            app icon, for packaging
 //!   heft --clean [--dry-run] [--out <file>]     junk cleaner with the saved selection
-//!   heft --check-refresh <drive>                 test change-journal rescans (Windows, admin)
-//!   heft --sensors [--rounds N]                 read every hardware sensor and print them (Windows, Linux)
+//!   heft --check-refresh <path> [--wait]         test quick rescans (Windows: NTFS as admin; macOS)
+//!   heft --sensors [--rounds N] [--report]      read every hardware sensor and print them
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
@@ -22,7 +22,8 @@ use crate::{colors, platform};
 
 pub fn is_cli_command(arg: &str) -> bool {
     matches!(arg, "--bench" | "--export" | "--compare" | "--render" | "--icon" | "--help" | "--clean" | "--check-refresh")
-        || (cfg!(any(windows, target_os = "linux")) && arg == "--sensors")
+        || arg == "--sensors"
+        || (cfg!(target_os = "macos") && arg == "--compress-files")
 }
 
 pub fn run(args: &[String]) -> ExitCode {
@@ -81,14 +82,28 @@ pub fn run(args: &[String]) -> ExitCode {
         },
         "--clean" => clean(flag("--dry-run"), &mut out),
         "--check-refresh" => match positional.first() {
+            #[cfg(target_os = "macos")]
+            Some(p) => check_refresh(p, flag("--wait"), &mut out),
+            #[cfg(not(target_os = "macos"))]
             Some(p) => check_refresh(p, &mut out),
             None => usage(&mut out),
         },
-        #[cfg(any(windows, target_os = "linux"))]
         "--sensors" => {
             let rounds = value("--rounds").and_then(|s| s.parse().ok()).unwrap_or(3u32).clamp(1, 600);
-            sensors(rounds, &mut out)
+            sensors(rounds, flag("--report"), &mut out)
         }
+        // Run as root by the Compress dialog for apps installed for all users.
+        #[cfg(target_os = "macos")]
+        "--compress-files" => match (positional.first(), positional.get(1)) {
+            (Some(list), Some(results)) => match crate::compress::rewrite_listed(std::path::Path::new(list.as_str()), std::path::Path::new(results.as_str()), flag("--undo")) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    let _ = writeln!(out, "error: {e}");
+                    ExitCode::FAILURE
+                }
+            },
+            _ => usage(&mut out),
+        },
         _ => usage(&mut out),
     };
     print!("{out}");
@@ -110,17 +125,37 @@ fn usage(out: &mut String) -> ExitCode {
     );
     out.push_str(
         "heft --clean [--dry-run] [--out f]          run the junk cleaner with the selection saved in the GUI\n\
-         heft --check-refresh <drive> [--out f]      test change-journal rescans (Windows, as administrator)\n",
+         heft --check-refresh <path> [--wait] [--out f]  test quick rescans against a full scan\n\
+         \x20                                           (Windows: NTFS drive as administrator; macOS: local disk)\n",
     );
-    #[cfg(any(windows, target_os = "linux"))]
-    out.push_str("heft --sensors [--rounds N] [--out f]       read every hardware sensor and print them\n");
+    out.push_str(
+        "heft --sensors [--rounds N] [--out f]       read every hardware sensor and print them\n\
+         heft --sensors --report --out report.txt    the same, with what's needed to fix readings on your Mac\n",
+    );
     ExitCode::FAILURE
 }
 
 /// Every sensor after a few rounds (rates and power need two readings).
-#[cfg(any(windows, target_os = "linux"))]
-fn sensors(rounds: u32, out: &mut String) -> ExitCode {
+/// `report`: add what's needed to fix readings on a Mac Heft hasn't been
+/// tested on (macOS only).
+fn sensors(rounds: u32, report: bool, out: &mut String) -> ExitCode {
     use crate::sensors::{self, Driver, Kind};
+    #[cfg(target_os = "macos")]
+    if report {
+        let _ = writeln!(
+            out,
+            "Heft {} sensor report. If a reading is missing or wrong on your Mac, open an issue at\n\
+             https://github.com/gjnail/heft/issues, say which reading and what it should be (from Activity\n\
+             Monitor, iStat Menus or similar), and attach this file. It has no serial numbers, names or addresses.\n",
+            env!("CARGO_PKG_VERSION")
+        );
+        sensors::report_system(out);
+        let _ = writeln!(out, "\nWhat Heft shows");
+    }
+    #[cfg(not(target_os = "macos"))]
+    if report {
+        let _ = writeln!(out, "--report adds raw data on macOS only; here are the readings.\n");
+    }
     let snap = sensors::collect(rounds, std::time::Duration::from_secs(1));
     let driver = match &snap.driver {
         Driver::NotNeeded => "not needed".to_string(),
@@ -129,7 +164,10 @@ fn sensors(rounds: u32, out: &mut String) -> ExitCode {
         Driver::Active(uses) => format!("PawnIO: {}", uses.join(", ")),
         Driver::Failed(e) => e.clone(),
     };
-    let _ = writeln!(out, "driver    {driver}");
+    // Only Windows ever needs a driver for sensors.
+    if cfg!(windows) {
+        let _ = writeln!(out, "driver    {driver}");
+    }
     let _ = writeln!(out, "read in   {} ms per round\n", snap.sample_cost.as_millis());
     for d in &snap.devices {
         let detail = if d.detail.is_empty() { String::new() } else { format!("  {}", d.detail) };
@@ -152,6 +190,11 @@ fn sensors(rounds: u32, out: &mut String) -> ExitCode {
     }
     for n in &snap.notes {
         let _ = writeln!(out, "note: {}", n.text);
+    }
+    #[cfg(target_os = "macos")]
+    if report {
+        let _ = writeln!(out);
+        sensors::report_raw(out);
     }
     ExitCode::SUCCESS
 }
@@ -413,19 +456,27 @@ fn render(
 /// weekly scheduled task; `--dry-run` only reports what would go.
 fn clean(dry_run: bool, out: &mut String) -> ExitCode {
     use crate::clean::{self, rules};
+    use std::io::IsTerminal;
     let t0 = Instant::now();
     let selected = clean::load_selection();
     let p = clean::Progress::default();
     let (tx, rx) = crossbeam_channel::unbounded();
-    clean::analyze_all(selected.iter().copied().collect(), tx, &p);
+    let mut env = clean::Env::current();
+    // Scheduled runs have nobody there to type a password (macOS, Linux):
+    // rules that need one are skipped, as on Windows without elevation, and
+    // so are rules that would restart Finder under you.
+    env.unattended = !std::io::stdin().is_terminal();
+    env.can_elevate &= !env.unattended;
+    clean::analyze_with(selected.iter().copied().collect(), &env, tx, &p);
     let mut found: Vec<clean::Found> = rx.try_iter().collect();
     found.sort_by_key(|f| std::cmp::Reverse(f.bytes));
 
-    let running = clean::running_processes();
-    let (mut freed, mut removed, mut skipped) = (0u64, 0u64, 0u64);
+    let name = |rule: usize| {
+        let r = &rules::all()[rule];
+        format!("{} · {}", r.app, r.name)
+    };
+    let mut jobs = Vec::new();
     for f in &found {
-        let r = &rules::all()[f.rule];
-        let name = format!("{} · {}", r.app, r.name);
         if f.items == 0 && !f.special_only() {
             continue;
         }
@@ -437,15 +488,18 @@ fn clean(dry_run: bool, out: &mut String) -> ExitCode {
             } else {
                 String::new()
             };
-            let _ = writeln!(out, "{:>10}  {:>8} items  {name}{why}", fmt_size(f.bytes), fmt_count(f.items));
-            continue;
+            let _ = writeln!(out, "{:>10}  {:>8} items  {}{why}", fmt_size(f.bytes), fmt_count(f.items), name(f.rule));
+        } else {
+            jobs.push(f.clone());
         }
-        let c = clean::clean(f, &running, &p);
+    }
+    let (mut freed, mut removed, mut skipped) = (0u64, 0u64, 0u64);
+    for c in clean::clean_all(&jobs, &p) {
         freed += c.freed;
         removed += c.removed;
         skipped += c.skipped;
         let note = c.note.map(|n| format!("  ({n})")).unwrap_or_default();
-        let _ = writeln!(out, "{:>10}  {:>8} items  {name}{note}", fmt_size(c.freed), fmt_count(c.removed));
+        let _ = writeln!(out, "{:>10}  {:>8} items  {}{note}", fmt_size(c.freed), fmt_count(c.removed), name(c.rule));
     }
     let took = fmt_duration_ms(t0.elapsed().as_millis() as u64);
     if dry_run {
@@ -529,7 +583,7 @@ fn check_refresh(path: &str, out: &mut String) -> ExitCode {
     };
 
     let t0 = Instant::now();
-    let refreshed = scan::refresh(&mut state, &p);
+    let refreshed = scan::refresh(&mut state, &tree, &p);
     let refresh_ms = t0.elapsed().as_millis() as u64;
     match &refreshed {
         RefreshOutcome::Updated(t) => {
@@ -565,7 +619,7 @@ fn check_refresh(path: &str, out: &mut String) -> ExitCode {
     if let Err(e) = &removed {
         let _ = writeln!(out, "could not remove {dir_s}: {e}");
     }
-    match scan::refresh(&mut state, &p) {
+    match scan::refresh(&mut state, &tree, &p) {
         RefreshOutcome::Updated(t) => ok &= check("after rm", &t, None, out),
         RefreshOutcome::Unchanged => {
             ok = false;
@@ -580,8 +634,176 @@ fn check_refresh(path: &str, out: &mut String) -> ExitCode {
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-#[cfg(not(windows))]
+/// Scan a folder, change things in it, bring the scan up to date from the
+/// file system event history, and compare it item by item with a fresh full
+/// scan. By default it writes a scratch folder inside the scanned one (or in
+/// the temp folder if that's inside) and removes it after; with `wait` it
+/// waits for Enter instead, so you or a script can change anything.
+#[cfg(target_os = "macos")]
+fn check_refresh(path: &str, wait: bool, out: &mut String) -> ExitCode {
+    use crate::scan::fsevents;
+    use crate::scan::RefreshOutcome;
+    use std::fs;
+    use std::time::Duration;
+
+    let root = scan::normalize_root(path);
+    let p = Progress::default();
+    let (tree, state) = match scan::run_with(&root, false, true, &p) {
+        ScanOutcome::Done(t, Some(s)) => (t, s),
+        ScanOutcome::Done(..) => {
+            let why = fsevents::unavailable_reason(&root).unwrap_or_else(|| "unknown reason".into());
+            let _ = writeln!(out, "no quick rescans for {root}: {why}");
+            return ExitCode::FAILURE;
+        }
+        ScanOutcome::Cancelled => return ExitCode::FAILURE,
+        ScanOutcome::Failed(e) => {
+            let _ = writeln!(out, "scan failed: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut state = *state;
+    let _ = writeln!(out, "full scan   {} ({} files)", fmt_duration_ms(tree.info.duration_ms), fmt_count(tree.node(ROOT).files as u64));
+
+    // The scratch folder, and the (size, files) it should have.
+    let mut scratch: Option<(std::path::PathBuf, String, u64)> = None;
+    if wait {
+        eprintln!("Scanned {root}. Change files there, then press Enter.");
+        let _ = std::io::stdin().read_line(&mut String::new());
+    } else {
+        let temp = std::env::temp_dir();
+        let temp_s = scan::normalize_root(&temp.to_string_lossy());
+        let base = if temp_s.starts_with(&format!("{}/", root.trim_end_matches('/'))) { temp } else { std::path::PathBuf::from(&root) };
+        let dir = base.join(format!("heft-refresh-check-{}", std::process::id()));
+        let dir_s = dir.to_string_lossy().into_owned();
+        let since = fsevents::current_event_id();
+        let write = || -> std::io::Result<u64> {
+            fs::create_dir_all(dir.join("sub").join("deeper").join("deepest"))?;
+            let mut total = 0;
+            for i in 0..40u64 {
+                let len = 1000 + i * 777;
+                fs::write(dir.join(format!("f{i}.bin")), vec![7u8; len as usize])?;
+                total += len;
+            }
+            fs::write(dir.join("sub").join("deeper").join("deepest").join("big.bin"), vec![1u8; 5 << 20])?;
+            total += 5 << 20;
+            // Rename, delete, grow and link a few, so there's more than creates.
+            fs::rename(dir.join("f1.bin"), dir.join("sub").join("moved.bin"))?;
+            fs::remove_file(dir.join("f2.bin"))?;
+            total -= 1000 + 2 * 777;
+            let mut grown = fs::read(dir.join("f3.bin"))?;
+            grown.extend(vec![9u8; 300_000]);
+            fs::write(dir.join("f3.bin"), grown)?;
+            total += 300_000;
+            fs::hard_link(dir.join("f4.bin"), dir.join("sub").join("f4-link.bin"))?;
+            fs::rename(dir.join("sub").join("deeper"), dir.join("sub").join("renamed"))?;
+            fs::write(dir.join("last"), b"")?;
+            Ok(total)
+        };
+        let expect = match write() {
+            Ok(n) => n,
+            Err(e) => {
+                let _ = fs::remove_dir_all(&dir);
+                let _ = writeln!(out, "cannot write test files in {dir_s}: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if !fsevents::wait_logged(&dir.join("last"), since, Duration::from_secs(20)) {
+            let _ = writeln!(out, "FSEvents didn't log the changes within 20 s");
+        }
+        scratch = Some((dir, dir_s, expect));
+    }
+
+    let mut ok = true;
+    let check = |label: &str, t: &Tree, dir: &str, want: Option<(u64, u32)>, out: &mut String| {
+        let got = t.find(dir).map(|id| (t.node(id).size, t.node(id).files));
+        let pass = got == want;
+        let show = |v: Option<(u64, u32)>| v.map(|(s, f)| format!("{s} bytes, {f} files")).unwrap_or_else(|| "absent".into());
+        let _ = writeln!(out, "{label:<12}{}  (expected {})  {}", show(got), show(want), if pass { "ok" } else { "MISMATCH" });
+        pass
+    };
+    let t0 = Instant::now();
+    let refreshed = scan::refresh(&mut state, &tree, &p);
+    let refresh_ms = t0.elapsed().as_millis() as u64;
+    match &refreshed {
+        RefreshOutcome::Updated(t) => {
+            let _ = writeln!(out, "refresh     {} ({})", fmt_duration_ms(refresh_ms), t.info.note.clone().unwrap_or_default());
+            for (name, ms) in &t.info.phases {
+                let _ = writeln!(out, "  phase     {name:<26}{}", fmt_duration_ms(*ms));
+            }
+            if let Some((_, dir_s, expect)) = &scratch {
+                ok &= check("refreshed", t, dir_s, Some((*expect, 42)), out);
+            }
+        }
+        RefreshOutcome::Unchanged => {
+            let _ = writeln!(out, "refresh     {}: nothing changed", fmt_duration_ms(refresh_ms));
+            ok &= scratch.is_none();
+        }
+        RefreshOutcome::NeedFullScan(why) => {
+            ok = false;
+            let _ = writeln!(out, "refresh gave up: {why}");
+        }
+    }
+    let t1 = Instant::now();
+    match scan::walk::scan(&root, &p) {
+        Ok(full) => {
+            let _ = writeln!(out, "full scan   {} to compare", fmt_duration_ms(t1.elapsed().as_millis() as u64));
+            let refreshed_tree = match &refreshed {
+                RefreshOutcome::Updated(t) => Some(t),
+                _ => None,
+            };
+            if let Some(t) = refreshed_tree {
+                let diffs = fsevents::differences(t, &full, 40);
+                if diffs.is_empty() {
+                    let _ = writeln!(out, "the refreshed scan and the full scan match");
+                } else {
+                    // Other programs may write between the two scans; only
+                    // the scratch folder is certain.
+                    ok &= match &scratch {
+                        Some((_, dir_s, _)) => !diffs.iter().any(|d| d.contains(dir_s.as_str())),
+                        None => false,
+                    };
+                    let _ = writeln!(out, "differences (programs writing between the two scans cause some too):");
+                    for d in &diffs {
+                        let _ = writeln!(out, "  {d}");
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            ok = false;
+            let _ = writeln!(out, "full scan failed: {e}");
+        }
+    }
+
+    if let Some((dir, dir_s, _)) = &scratch {
+        let since = fsevents::current_event_id();
+        if let Err(e) = fs::remove_dir_all(dir) {
+            let _ = writeln!(out, "could not remove {dir_s}: {e}");
+        }
+        fsevents::wait_logged(dir, since, Duration::from_secs(20));
+        // Changes apply to the tree the last refresh returned.
+        let latest = match &refreshed {
+            RefreshOutcome::Updated(t) => t,
+            _ => &tree,
+        };
+        match scan::refresh(&mut state, latest, &p) {
+            RefreshOutcome::Updated(t) => ok &= check("after rm", &t, dir_s, None, out),
+            RefreshOutcome::Unchanged => {
+                ok = false;
+                let _ = writeln!(out, "second refresh saw no changes: MISMATCH");
+            }
+            RefreshOutcome::NeedFullScan(why) => {
+                ok = false;
+                let _ = writeln!(out, "second refresh gave up: {why}");
+            }
+        }
+    }
+    let _ = writeln!(out, "{}", if ok { "PASS" } else { "FAIL" });
+    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn check_refresh(_path: &str, out: &mut String) -> ExitCode {
-    let _ = writeln!(out, "change-journal rescans are Windows only");
+    let _ = writeln!(out, "quick rescans need NTFS on Windows or FSEvents on macOS");
     ExitCode::FAILURE
 }

@@ -13,6 +13,10 @@ use eframe::egui::{self, Align, Layout, RichText};
 
 use crate::sensors::{Class, Driver, Kind, Monitor, NoteLevel, Snapshot};
 
+/// The click that adds a reading to the chart: egui's "command" modifier,
+/// which is Cmd on a Mac.
+const COMPARE_CLICK: &str = if cfg!(target_os = "macos") { "Cmd-click" } else { "Ctrl-click" };
+
 /// Things the page asks the main app to do.
 pub enum Event {
     Toast(String, bool),
@@ -402,7 +406,7 @@ fn focus_card(ui: &mut egui::Ui, snap: &Snapshot, vs: &mut ViewState) {
             ui.add_space(4.0);
             draw::history_chart(ui, 190.0, &snap.times, &series, kind, vs.window as f64, vs.fahrenheit);
             if found.len() == 1 {
-                ui.label(RichText::new("Ctrl-click another reading of the same kind to compare.").weak().size(11.0));
+                ui.label(RichText::new(format!("{COMPARE_CLICK} another reading of the same kind to compare.")).weak().size(11.0));
             }
         });
     if close {

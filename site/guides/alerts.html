@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Free space alerts · Heft</title>
-  <meta name="description" content="Get a warning from Heft before a drive fills up, and keep it watching from the Windows notification area.">
+  <meta name="description" content="Get a warning from Heft before a drive fills up, and keep it watching from the Windows notification area or the Mac menu bar.">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="../images/favicon-32.png" type="image/png">
   <link rel="stylesheet" href="../assets/style.css">
@@ -39,6 +39,7 @@
       <li><a href="cleaner.html">The Cleaner</a></li>
       <li><a href="hardware.html">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html" aria-current="page">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -65,18 +66,23 @@
       <li>you get one desktop notification for that drive. You won't get another until it has recovered and filled up again.</li>
     </ul>
     <p>Press <strong>Dismiss</strong> to hide the warning in the window.</p>
-    <p>Notifications use the notification area on Windows, Notification Center on macOS, and <code>notify-send</code> on Linux. If nothing appears on Linux, install your distribution's <code>libnotify</code> package, which provides <code>notify-send</code>.</p>
+    <p>Notifications use the notification area on Windows, Notification Center on macOS, and <code>notify-send</code> on Linux. On a Mac, clicking a notification from Heft opens Heft. If nothing appears on Linux, install your distribution's <code>libnotify</code> package, which provides <code>notify-send</code>.</p>
 
-    <h2 id="background">Keeping watch in the background (Windows)</h2>
-    <p>Two more options in the same menu let Heft keep an eye on your drives when you're not using it:</p>
+    <h2 id="background">Keeping watch in the background (Windows and macOS)</h2>
+    <p>Two more options in the same menu let Heft keep an eye on your drives when you're not using it. On Windows:</p>
     <ul>
       <li><strong>Keep watching in the notification area after closing.</strong> Closing the window hides Heft next to the clock instead of quitting. Click the icon to bring the window back, or right-click it to quit.</li>
       <li><strong>Start with Windows, in the notification area.</strong> Heft starts hidden when you sign in and only speaks up when a drive is almost full. This adds a <code>Heft</code> value under <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>; untick it to remove it.</li>
     </ul>
-    <p>To start Heft hidden yourself, for example from a shortcut, run <code>heft.exe --tray</code>.</p>
+    <p>On a Mac:</p>
+    <ul>
+      <li><strong>Keep watching in the menu bar after closing.</strong> Closing the window hides Heft in the menu bar instead of quitting. Click its icon for a menu with each drive's free space, <strong>Open Heft</strong> and <strong>Quit Heft</strong>.</li>
+      <li><strong>Start at login, in the menu bar.</strong> Heft starts hidden when you log in and only speaks up when a drive is almost full. This adds a launch agent, <code>~/Library/LaunchAgents/io.github.gjnail.heft.plist</code>, and macOS shows a "Background Items Added" notice. Untick it to remove it. Move Heft to your Applications folder and open it from there first; if macOS is running it from a temporary copy, Heft says so.</li>
+    </ul>
+    <p>To start Heft hidden yourself, for example from a shortcut, run <code>heft.exe --tray</code> on Windows or <code>heft --tray</code> on a Mac (see <a href="command-line.html">Command line</a>).</p>
 
     <div class="pager">
-      <a href="windows-tools.html"><small>Previous</small>Startup, programs and registry</a>
+      <a href="mac-tools.html"><small>Previous</small>Login items, apps and broken items</a>
       <a class="next" href="command-line.html"><small>Next</small>Command line</a>
     </div>
   </main>

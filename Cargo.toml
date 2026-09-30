@@ -17,7 +17,6 @@ lz4_flex = "0.14"
 png = "0.18"
 rayon = "1"
 rfd = "0.17"
-trash = "5"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [build-dependencies]
@@ -29,6 +28,22 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# macOS moves things to the Trash itself (see platform::move_to_trash).
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+trash = "5"
+
+# macOS integration: the Trash, the menu bar icon, notifications, and reading
+# property lists (app bundles, launch agents). eframe already builds these.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSButton", "NSControl", "NSGraphics", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSError", "NSFileManager", "NSAppleEventManager", "NSBundle", "NSGeometry"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+plist = { version = "1", default-features = false }
+winit = { version = "0.30", default-features = false }
 
 # Linux needs a windowing backend picked explicitly.
 [target.'cfg(target_os = "linux")'.dependencies]

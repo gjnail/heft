@@ -113,7 +113,7 @@ pub fn show(ui: &mut egui::Ui, snap: &Snapshot, vs: &mut ViewState) {
                     };
                     draw::sparkline(painter, spark, &vals, lo, hi, color, 120);
                 }
-                if resp.on_hover_text("Click to chart. Ctrl-click to compare.").clicked() {
+                if resp.on_hover_text(format!("Click to chart. {} to compare.", super::COMPARE_CLICK)).clicked() {
                     let add = ui.input(|i| i.modifiers.command);
                     vs.toggle_focus(snap, &d.key, &s.key, add);
                 }

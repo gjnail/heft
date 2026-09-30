@@ -33,7 +33,19 @@ struct Tile<'a> {
 }
 
 fn cpu_temp(d: &Device) -> Option<&Sensor> {
-    d.first_of(Kind::Temperature, &["Tctl/Tdie", "Tdie", "Package", "Core max", "Tctl"]).or_else(|| d.of_kind(Kind::Temperature).next())
+    // Apple silicon has no package sensor; Macs show the cores' average.
+    d.first_of(Kind::Temperature, &["Tctl/Tdie", "Tdie", "Package", "Core average", "Core max", "Tctl"])
+        .or_else(|| d.of_kind(Kind::Temperature).next())
+}
+
+/// A per-core reading: "Core #3", "Thread #3", or on Apple silicon "Super core #3".
+fn is_core(label: &str) -> bool {
+    label.starts_with("Core #") || label.starts_with("Thread #") || label.contains(" core #")
+}
+
+/// Graphics power: the whole card, or on Apple silicon the GPU itself.
+fn gpu_power(d: &Device) -> Option<&Sensor> {
+    d.first_of(Kind::Power, &["Board", "GPU"])
 }
 
 fn primary_temp(d: &Device) -> Option<&Sensor> {
@@ -64,8 +76,10 @@ fn tiles(ui: &mut egui::Ui, snap: &Snapshot, vs: &mut ViewState) {
             _ => "Not available for this processor",
         };
         let mut sub = Vec::new();
-        if let Some(p) = cpu.first_of(Kind::Power, &["Package"]).and_then(|s| s.value) {
-            sub.push(format!("{} package", vs.fmt(Kind::Power, p)));
+        if let Some(s) = cpu.first_of(Kind::Power, &["Package", "Cores"])
+            && let Some(p) = s.value
+        {
+            sub.push(format!("{} {}", vs.fmt(Kind::Power, p), s.label.to_lowercase()));
         }
         tiles.push(Tile {
             title: "CPU temperature".into(),
@@ -95,12 +109,11 @@ fn tiles(ui: &mut egui::Ui, snap: &Snapshot, vs: &mut ViewState) {
             });
         }
         if let Some(load) = gpu.first_of(Kind::Load, &["Core"]) {
-            let power = gpu.first_of(Kind::Power, &["Board"]).and_then(|s| s.value);
-            tiles.push(Tile {
-                title: "GPU load".into(),
-                value: TileValue::Reading(gpu, load),
-                sub: power.map(|w| format!("{} board power", vs.fmt(Kind::Power, w))).unwrap_or_default(),
-            });
+            let sub = gpu_power(gpu)
+                .and_then(|s| Some((s.value?, if s.label == "Board" { "board power" } else { "power" })))
+                .map(|(w, what)| format!("{} {what}", vs.fmt(Kind::Power, w)))
+                .unwrap_or_default();
+            tiles.push(Tile { title: "GPU load".into(), value: TileValue::Reading(gpu, load), sub });
         }
     }
     if let Some(mem) = find(Class::Memory)
@@ -325,7 +338,7 @@ impl<'b> Rows<'_, 'b> {
                 self.vs.fmt(kind, s.avg()),
                 self.vs.fmt(kind, s.max)
             ));
-            ui.label(RichText::new("Click to chart. Ctrl-click to compare.").weak());
+            ui.label(RichText::new(format!("Click to chart. {} to compare.", super::COMPARE_CLICK)).weak());
         });
         if resp.clicked() {
             let add = self.ui.input(|i| i.modifiers.command);
@@ -387,7 +400,7 @@ fn card(ui: &mut egui::Ui, d: &Device, width: f32, snap: &Snapshot, vs: &mut Vie
 
 fn cpu_card(r: &mut Rows) {
     let d = r.dev;
-    for s in d.of_kind(Kind::Temperature).filter(|s| !s.label.starts_with("Core #")) {
+    for s in d.of_kind(Kind::Temperature).filter(|s| !is_core(&s.label)) {
         r.temp(&s.label, s);
     }
     if let Some(s) = d.first_of(Kind::Load, &["Total"]) {
@@ -406,7 +419,7 @@ fn cpu_card(r: &mut Rows) {
 /// One bar per core: how busy it is, with its clock on hover.
 fn core_strip(r: &mut Rows) {
     let d = r.dev;
-    let cores: Vec<&Sensor> = d.of_kind(Kind::Load).filter(|s| s.label.starts_with("Core #")).collect();
+    let cores: Vec<&Sensor> = d.of_kind(Kind::Load).filter(|s| is_core(&s.label)).collect();
     if cores.is_empty() {
         return;
     }
@@ -469,7 +482,7 @@ fn gpu_card(r: &mut Rows) {
     } else if let Some(s) = d.first_of(Kind::Data, &["Shared memory used", "Memory used"]) {
         r.plain("Memory used", s);
     }
-    if let Some(s) = d.first_of(Kind::Power, &["Board"]) {
+    if let Some(s) = gpu_power(d) {
         let accent = r.p.accent;
         r.spark("Power", s, accent);
     } else if let Some(s) = d.first_of(Kind::Level, &["Board power"]) {
@@ -505,6 +518,13 @@ fn memory_card(r: &mut Rows) {
     }
     if let Some(s) = d.first_of(Kind::Load, &["Committed"]) {
         r.load("Committed", s);
+    }
+    // macOS compresses memory before it swaps.
+    if let Some(s) = d.first_of(Kind::Data, &["Compressed"]) {
+        r.plain("Compressed", s);
+    }
+    if let Some(s) = d.first_of(Kind::Load, &["Swap"]) {
+        r.load("Swap", s);
     }
 }
 
@@ -566,16 +586,29 @@ fn board_card(r: &mut Rows) {
             r.plain(&s.label, s);
         }
     }
+    // A Mac's whole-system power draw.
+    let power: Vec<&Sensor> = d.of_kind(Kind::Power).collect();
+    if !power.is_empty() {
+        r.section("Power");
+        for s in power {
+            let accent = r.p.accent;
+            r.spark(&s.label, s, accent);
+        }
+    }
 }
 
 fn generic_card(r: &mut Rows) {
     let d = r.dev;
     for kind in Kind::ALL {
         for s in d.of_kind(kind) {
+            // A label used by two kinds of reading (a battery's temperature
+            // and voltage) says which one each row is.
+            let shared = d.sensors.iter().any(|o| o.label == s.label && o.kind != kind);
+            let label = if shared { format!("{} {}", s.label, kind.noun()) } else { s.label.clone() };
             match kind {
-                Kind::Temperature => r.temp(&s.label, s),
-                Kind::Load | Kind::Level | Kind::Duty => r.load(&s.label, s),
-                _ => r.plain(&s.label, s),
+                Kind::Temperature => r.temp(&label, s),
+                Kind::Load | Kind::Level | Kind::Duty => r.load(&label, s),
+                _ => r.plain(&label, s),
             }
         }
     }

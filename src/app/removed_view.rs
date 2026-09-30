@@ -16,7 +16,7 @@ use crate::util::{fmt_ago, fmt_size};
 pub(super) struct RemovedState {
     entries: Vec<Removed>,
     loaded: bool,
-    /// Which logged paths are still in the trash (None until checked).
+    /// Keys of the logged items still in the trash (None until checked).
     in_trash: Option<HashSet<String>>,
     checking: Option<Receiver<Result<HashSet<String>, String>>>,
     restoring: Option<Receiver<Result<usize, String>>>,
@@ -38,7 +38,7 @@ impl HeftApp {
             st.loaded = true;
             st.checked.clear();
             st.in_trash = None;
-            if trashlog::CAN_RESTORE && !st.entries.is_empty() {
+            if !st.entries.is_empty() {
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let (items, ctx) = (st.entries.clone(), ui.ctx().clone());
                 std::thread::spawn(move || {
@@ -81,8 +81,17 @@ impl HeftApp {
             ui.label(RichText::new("Nothing yet. Anything you remove with Heft shows up here so you can find it later.").weak());
             return;
         }
-        if !trashlog::CAN_RESTORE {
-            ui.label(RichText::new("macOS only lets Finder put things back: open the Trash, right-click an item and choose Put Back.").weak());
+        // Items an older Heft moved to the Trash on a Mac didn't have their
+        // place in the Trash recorded; only Finder can find those.
+        let finder_only = |r: &Removed| cfg!(target_os = "macos") && r.trashed_at.is_none();
+        if st.entries.iter().any(|r| !r.restored && finder_only(r)) {
+            ui.label(
+                RichText::new(
+                    "Items removed with an older version of Heft can only be put back from Finder: open the Trash, \
+                     right-click an item and choose Put Back.",
+                )
+                .weak(),
+            );
             if ui.button("Open the Trash").clicked()
                 && let Some(home) = platform::home_dir()
             {
@@ -95,22 +104,22 @@ impl HeftApp {
         let mut restore_now: Vec<Removed> = Vec::new();
         egui::ScrollArea::vertical().auto_shrink([false, false]).id_salt("removed_rows").max_height(ui.available_height() - 34.0).show(ui, |ui| {
             for (i, r) in st.entries.iter().enumerate().take(500) {
-                let available = !r.restored && st.in_trash.as_ref().is_none_or(|s| s.contains(&r.path));
+                let available = !r.restored && !finder_only(r) && st.in_trash.as_ref().is_none_or(|s| s.contains(r.key()));
                 ui.horizontal(|ui| {
-                    if trashlog::CAN_RESTORE {
-                        let mut on = st.checked.contains(&i);
-                        if ui.add_enabled(available, egui::Checkbox::new(&mut on, "")).changed() {
-                            if on {
-                                st.checked.insert(i);
-                            } else {
-                                st.checked.remove(&i);
-                            }
+                    let mut on = st.checked.contains(&i);
+                    if ui.add_enabled(available, egui::Checkbox::new(&mut on, "")).changed() {
+                        if on {
+                            st.checked.insert(i);
+                        } else {
+                            st.checked.remove(&i);
                         }
                     }
                     ui.label(RichText::new(fmt_size(r.size)).monospace().size(11.5));
                     let status = if r.restored {
                         "put back".to_string()
-                    } else if st.in_trash.as_ref().is_some_and(|s| !s.contains(&r.path)) {
+                    } else if finder_only(r) {
+                        format!("{}, use Finder to put it back", fmt_ago(now - r.when))
+                    } else if st.in_trash.as_ref().is_some_and(|s| !s.contains(r.key())) {
                         format!("no longer in the {}", platform::TRASH)
                     } else {
                         fmt_ago(now - r.when)
@@ -125,18 +134,16 @@ impl HeftApp {
                 });
             }
         });
-        if trashlog::CAN_RESTORE {
-            ui.horizontal(|ui| {
-                let n = st.checked.len();
-                let busy = st.restoring.is_some();
-                if ui.add_enabled(n > 0 && !busy, egui::Button::new(format!("Put back {n} selected"))).clicked() {
-                    restore_now = st.checked.iter().filter_map(|&i| st.entries.get(i).cloned()).collect();
-                }
-                if busy || st.checking.is_some() {
-                    ui.spinner();
-                }
-            });
-        }
+        ui.horizontal(|ui| {
+            let n = st.checked.len();
+            let busy = st.restoring.is_some();
+            if ui.add_enabled(n > 0 && !busy, egui::Button::new(format!("Put back {n} selected"))).clicked() {
+                restore_now = st.checked.iter().filter_map(|&i| st.entries.get(i).cloned()).collect();
+            }
+            if busy || st.checking.is_some() {
+                ui.spinner();
+            }
+        });
         if !restore_now.is_empty() {
             let (tx, rx) = crossbeam_channel::bounded(1);
             let ctx = ui.ctx().clone();

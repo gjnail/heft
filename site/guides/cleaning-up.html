@@ -39,6 +39,7 @@
       <li><a href="cleaner.html">The Cleaner</a></li>
       <li><a href="hardware.html">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -83,12 +84,23 @@
           <tr><td>Large virtual disks</td><td>WSL, Docker and virtual machine disks that grow but don't shrink by themselves.</td><td>n/a</td></tr>
           <tr><td>Previous Windows installation</td><td>A <code>Windows.old</code> folder left by an upgrade.</td><td>n/a</td></tr>
           <tr><td>Hibernation file</td><td>The space Windows reserves for hibernation and Fast Startup.</td><td>n/a</td></tr>
-          <tr><td>Programs and games you haven't updated in three months</td><td>Folders that could be <a href="duplicates.html#compress">compressed</a> in place (Windows, NTFS).</td><td>n/a</td></tr>
+          <tr><td>Old macOS installers</td><td>Full macOS installers left in Applications after an upgrade, or downloaded to make a startup disk. You can download them again from Apple.</td><td>No</td></tr>
+          <tr><td>iPhone and iPad software downloads</td><td>Copies of iOS and iPadOS that Finder downloaded to update or restore a device. Finder downloads a fresh one when it needs it.</td><td>Yes</td></tr>
+          <tr><td>iPhone and iPad backups</td><td>Finder's backups of every device you've backed up to this Mac, including ones you no longer have.</td><td>n/a</td></tr>
+          <tr><td>Time Machine snapshots on this disk</td><td>Hourly snapshots Time Machine keeps on the Mac itself. The space they take doesn't show up in a scan.</td><td>n/a</td></tr>
+          <tr><td>Hibernation image</td><td>The file macOS writes memory to when a laptop sleeps, so your work survives a flat battery.</td><td>n/a</td></tr>
+          <tr><td>Docker Desktop's disk</td><td>The one file where Docker Desktop on a Mac keeps every image, container and volume.</td><td>n/a</td></tr>
+          <tr><td>Messages attachments</td><td>Every photo, video and file sent or received in Messages on a Mac.</td><td>n/a</td></tr>
+          <tr><td>Xcode archives</td><td>Builds archived in Xcode to upload or share, with their debug symbols.</td><td>n/a</td></tr>
+          <tr><td>Mail downloads</td><td>Copies of attachments opened from Mail on a Mac.</td><td>n/a</td></tr>
+          <tr><td>Photos library</td><td>The full-size originals Photos keeps on a Mac, and how Optimize Mac Storage keeps them in iCloud instead.</td><td>n/a</td></tr>
+          <tr><td>Big iCloud Drive files kept on this Mac</td><td>Files that are also in iCloud and haven't changed in a month. <a href="duplicates.html#icloud">Removing the download</a> frees the space without deleting them.</td><td>No</td></tr>
+          <tr><td>Programs, apps and games you haven't updated in three months</td><td>Folders that could be <a href="duplicates.html#compress">compressed</a> in place (NTFS on Windows, APFS on a Mac).</td><td>n/a</td></tr>
         </tbody>
       </table>
     </div>
-    <p>Suggestions marked n/a aren't things Heft sends to the Recycle Bin. They explain what to do and, where there's a right tool for the job, point you to it: Steam for games, Disk Cleanup for <code>Windows.old</code>, <code>powercfg /hibernate off</code> for the hibernation file, or the Cleaner page for caches and virtual disks.</p>
-    <p>Anything Heft considers dangerous to delete never appears as a suggestion.</p>
+    <p>Suggestions marked n/a aren't things Heft sends to the Recycle Bin or Trash. They explain what to do and, where there's a right tool for the job, point you to it: Steam for games, Disk Cleanup for <code>Windows.old</code>, <code>powercfg /hibernate off</code> for the hibernation file, or the Cleaner page for caches and virtual disks. On a Mac: Finder's Manage Backups for iPhone and iPad backups, Docker itself for Docker Desktop's disk, <code>pmset</code> for the hibernation image on a Mac that's always plugged in, Storage settings or Messages' own setting for Messages attachments, Xcode's Organizer for archives, Mail's setting for its downloads, and Optimize Mac Storage for the Photos library. Time Machine removes its local snapshots by itself, so they rarely need attention.</p>
+    <p>Anything Heft considers dangerous to delete never appears as a suggestion, and nothing that comes with a warning is ever ticked for you.</p>
 
     <h2 id="build-junk">Build junk</h2>
     <figure class="shot">
@@ -108,7 +120,7 @@
     <h2 id="warnings">What the warnings mean</h2>
     <p>Heft marks files and folders that are risky to delete with a triangle in the tree, and explains the risk in the treemap tooltip, the right-click menu and the delete dialog. There are two levels:</p>
     <ul>
-      <li><strong>Caution (yellow):</strong> deleting it might break an app or lose data. For example installed programs, app settings and data, cloud-synced folders, mailboxes, saved games, a Git repository's history, virtual disks, the hibernation file and Time Machine backups.</li>
+      <li><strong>Caution (yellow):</strong> deleting it might break an app or lose data. For example installed programs and apps, app settings and data, cloud-synced folders including iCloud Drive, mailboxes, Messages history, music libraries, iPhone backups, saved games, a Git repository's history, virtual disks, the hibernation file and Time Machine backups.</li>
       <li><strong>Danger (red):</strong> deleting it might stop the computer from starting or working. For example Windows and macOS system folders, device drivers, startup files, a user profile or home folder, the user registry, keychains and whole drives.</li>
     </ul>
     <p>Each warning says what could go wrong and what to do instead, such as using Disk Cleanup for the Windows folder or your package manager on Linux.</p>
@@ -125,10 +137,9 @@
 
     <h2 id="removed">Putting things back</h2>
     <p>The <strong>Removed</strong> tab lists everything Heft has moved to the Recycle Bin or Trash, newest first, even across restarts.</p>
-    <ul>
-      <li><strong>Windows and Linux:</strong> select items and press <strong>Put back</strong>. Rescan to see them in the map again.</li>
-      <li><strong>macOS:</strong> press <strong>Open the Trash</strong> and use Finder's Put Back.</li>
-    </ul>
+    <p>Select items and press <strong>Put back</strong>. Rescan to see them in the map again.</p>
+    <p>On a Mac, Heft remembers where each item landed in the Trash. Items removed with an earlier version of Heft are the exception: those versions didn't record that, so they have to be put back from Finder. Press <strong>Open the Trash</strong>, right-click an item and choose Put Back.</p>
+    <p>Finder's own Put Back doesn't know about items Heft moved to the Trash, since Heft moves them itself rather than asking Finder. If you'd like Put Back to work for them too, turn on <strong>Move items to the Trash through Finder</strong> in Settings (<kbd>Cmd</kbd>-<kbd>,</kbd>). macOS then asks once to let Heft control Finder.</p>
     <p>Once the Recycle Bin or Trash has been emptied, the files are gone for good.</p>
 
     <div class="pager">

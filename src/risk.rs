@@ -172,10 +172,27 @@ fn system(p: &str, comps: &[&str]) -> Option<Risk> {
     if comps.is_empty() {
         return danger("The whole disk", "This is the top of the disk. Deleting it deletes everything on it.");
     }
-    if under("/usr/local") {
-        return caution("Installed tools", "Software installed by you or Homebrew. Uninstall it with the tool that installed it.");
+    if under("/usr/local") || under("/opt") {
+        return caution(
+            "Installed tools",
+            "Software installed by you, Homebrew or MacPorts. Uninstall it with the tool that installed it.",
+        );
     }
-    for base in ["/system", "/usr", "/bin", "/sbin", "/private/var/db", "/library/apple", "/cores"] {
+    // Temporary files are meant to be cleaned.
+    if under("/private/tmp") || under("/private/var/tmp") || under("/private/var/folders") {
+        return None;
+    }
+    if p == "/private/var/vm/sleepimage" {
+        return caution(
+            "Hibernation image",
+            "macOS saves what's in memory here so your work survives if the battery runs out during sleep. Don't \
+             delete it directly; the Suggestions tab explains how to turn it off.",
+        );
+    }
+    if under("/private/var/log") {
+        return caution("System logs", "macOS trims these itself. Remove old ones selectively if they're very large.");
+    }
+    for base in ["/system", "/usr", "/bin", "/sbin", "/private", "/library/apple", "/cores"] {
         if under(base) {
             return danger("Part of macOS", "macOS needs these files. Deleting them can stop the Mac from starting.");
         }
@@ -183,10 +200,13 @@ fn system(p: &str, comps: &[&str]) -> Option<Risk> {
     if comps.len() == 1 {
         return danger("System folder", "macOS and your apps expect this folder to exist.");
     }
-    if comps.first() == Some(&"users") && comps.len() == 2 {
+    if comps[0] == "volumes" && comps.len() == 2 {
+        return danger("A whole drive", "This is the top of a drive. Deleting it deletes everything on it.");
+    }
+    if comps[0] == "users" && comps.len() == 2 {
         return danger("A user's home folder", "Everything that belongs to this user: documents, settings and apps.");
     }
-    if comps.iter().any(|c| *c == "keychains") {
+    if comps.contains(&"keychains") {
         return danger("Keychain", "Saved passwords and certificates. Deleting it can lock you out of accounts.");
     }
     if comps.iter().any(|c| c.ends_with(".photoslibrary")) {
@@ -195,26 +215,67 @@ fn system(p: &str, comps: &[&str]) -> Option<Risk> {
             "Your whole Photos library. Anything not synced to iCloud or backed up is gone for good.",
         );
     }
-    if comps.iter().any(|c| *c == "mobile documents") {
+    if comps.iter().any(|c| c.ends_with(".musiclibrary") || c.ends_with(".tvlibrary") || *c == "itunes library.itl") {
+        return caution(
+            "Music or TV library",
+            "Your playlists, ratings and play history. The songs and videos are in the Media folder next to it; \
+             remove them in the Music or TV app instead.",
+        );
+    }
+    if comps.contains(&"mobile documents") {
         return cloud();
     }
-    if comps.iter().any(|c| *c == "backups.backupdb") {
+    if comps.contains(&"backups.backupdb") {
         return caution("Time Machine backup", "Manage old backups from Time Machine instead of deleting them here.");
     }
-    if comps.first() == Some(&"applications") && comps.len() == 2 {
+    // An app bundle, or something inside one.
+    let apps = if comps[0] == "applications" { Some(1) } else { (comps[0] == "users" && comps.get(2) == Some(&"applications")).then_some(3) };
+    if let Some(i) = apps
+        && comps.len() == i + 1
+    {
         return caution(
             "An app",
             "Moving an app to the Trash is how Mac apps are uninstalled, but its settings stay in ~/Library.",
         );
     }
-    if let Some(i) = comps.iter().position(|c| *c == "library") {
-        if comps.get(i + 1) == Some(&"caches") {
-            return None; // caches are meant to be cleared
-        }
+    // Folders named after a bundle id (`com.example.app`) end in `.app` too.
+    if comps.windows(2).any(|w| w[0].ends_with(".app") && w[1] == "contents") {
         return caution(
-            "App settings and data",
-            "Settings and saved data for your apps. Deleting it can reset an app or lose its data.",
+            "Part of an app",
+            "Deleting files inside an app breaks it, and macOS may refuse to open it. Remove the whole app instead.",
         );
+    }
+    // The system's /Library, and your own ~/Library.
+    let lib = if comps[0] == "library" { Some(1) } else { (comps[0] == "users" && comps.get(2) == Some(&"library")).then_some(3) };
+    if let Some(i) = lib {
+        let rest = &comps[i..];
+        return match rest {
+            ["caches" | "logs", ..] => None, // meant to be cleared
+            // Copies of iOS that Finder downloads again when it needs one.
+            ["itunes", .., name] if name.ends_with(".ipsw") => None,
+            ["cloudstorage", ..] => cloud(),
+            ["mail", ..] => caution(
+                "Mail",
+                "Your email as Mail keeps it. Messages that aren't on a mail server, like those in On My Mac \
+                 mailboxes, are gone for good.",
+            ),
+            ["messages", ..] => caution(
+                "Messages history",
+                "Your conversations and their attachments. Delete conversations in Messages instead.",
+            ),
+            ["application support", "mobilesync", "backup", ..] => caution(
+                "iPhone or iPad backup",
+                "Backups of your devices. Delete old ones in Finder (select the device, then Manage Backups) so \
+                 you can see which is which.",
+            ),
+            // Keys, virtual disks and the like say more than the folder does.
+            _ => everywhere(comps).or_else(|| {
+                caution(
+                    "App settings and data",
+                    "Settings and saved data for your apps. Deleting it can reset an app or lose its data.",
+                )
+            }),
+        };
     }
     None
 }
@@ -295,7 +356,7 @@ fn everywhere(comps: &[&str]) -> Option<Risk> {
             "A Git repository's history. Deleting it loses every commit and any work that isn't pushed.",
         );
     }
-    if matches!(ext, "vhdx" | "vhd" | "vmdk" | "vdi" | "qcow2" | "avhdx") {
+    if matches!(ext, "vhdx" | "vhd" | "vmdk" | "vdi" | "qcow2" | "avhdx" | "hds") || name == "docker.raw" {
         return caution(
             "Virtual disk",
             "A virtual machine, WSL or Docker disk. Deleting it deletes everything inside that system. Shrink it \
@@ -345,6 +406,50 @@ mod tests {
         assert_eq!(level("/home/ana"), Some(Level::Danger));
         assert_eq!(level("/home/ana/.cache/thing"), None);
         assert_eq!(level("/home/ana/Videos/clip.mp4"), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_locations() {
+        let title = |p: &str| assess_path(p).map(|r| r.title);
+        assert_eq!(level("/"), Some(Level::Danger));
+        assert_eq!(level("/System/Library/CoreServices"), Some(Level::Danger));
+        assert_eq!(level("/usr/lib/libSystem.B.dylib"), Some(Level::Danger));
+        assert_eq!(level("/Library/Apple/usr"), Some(Level::Danger));
+        assert_eq!(level("/private/etc/hosts"), Some(Level::Danger));
+        assert_eq!(level("/private/var/db/receipts"), Some(Level::Danger));
+        assert_eq!(level("/Library"), Some(Level::Danger));
+        assert_eq!(level("/Volumes/Backup"), Some(Level::Danger));
+        assert_eq!(level("/Users/ana"), Some(Level::Danger));
+        assert_eq!(level("/Users/ana/Library/Keychains/login.keychain-db"), Some(Level::Danger));
+        assert_eq!(level("/Users/ana/Pictures/Photos Library.photoslibrary"), Some(Level::Danger));
+        assert_eq!(title("/private/var/vm/sleepimage"), Some("Hibernation image"));
+        assert_eq!(level("/private/var/log/system.log"), Some(Level::Caution));
+        assert_eq!(level("/private/var/folders/xy/T/thing.tmp"), None);
+        assert_eq!(level("/opt/homebrew/Cellar"), Some(Level::Caution));
+        assert_eq!(title("/Applications/Editor.app"), Some("An app"));
+        assert_eq!(title("/Users/ana/Applications/Game.app"), Some("An app"));
+        assert_eq!(title("/Applications/Editor.app/Contents/MacOS/Editor"), Some("Part of an app"));
+        assert_eq!(title("/Users/ana/Library/Mobile Documents/com~apple~CloudDocs/a.txt"), Some("Synced with the cloud"));
+        assert_eq!(title("/Users/ana/Library/CloudStorage/OneDrive-Personal/a.txt"), Some("Synced with the cloud"));
+        assert_eq!(title("/Users/ana/Library/Mail/V10"), Some("Mail"));
+        assert_eq!(title("/Users/ana/Library/Messages/chat.db"), Some("Messages history"));
+        assert_eq!(title("/Users/ana/Music/Music/Music Library.musiclibrary"), Some("Music or TV library"));
+        assert_eq!(
+            title("/Users/ana/Library/Application Support/MobileSync/Backup/00008110-001A"),
+            Some("iPhone or iPad backup")
+        );
+        assert_eq!(
+            title("/Users/ana/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"),
+            Some("Virtual disk")
+        );
+        assert_eq!(title("/Users/ana/Library/Application Support/Some App/prefs.json"), Some("App settings and data"));
+        assert_eq!(level("/Users/ana/Library/Caches/com.example.app/blob"), None);
+        assert_eq!(level("/Users/ana/Library/Logs/app.log"), None);
+        assert_eq!(level("/Users/ana/Library/iTunes/iPhone Software Updates/iPhone_18.0_Restore.ipsw"), None);
+        // A folder that happens to be called Library, in a Unity project, is just a folder.
+        assert_eq!(level("/Users/ana/Projects/game/Library/ShaderCache"), None);
+        assert_eq!(level("/Users/ana/Movies/clip.mov"), None);
     }
 
     #[test]

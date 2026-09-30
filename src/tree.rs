@@ -322,6 +322,17 @@ impl Tree {
         self.version += 1;
     }
 
+    /// A file's data now lives only in the cloud (its download was
+    /// removed): it keeps its size but takes no space (see [`flags::CLOUD`]).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn mark_cloud(&mut self, id: NodeId) {
+        let n = self.nodes[id as usize];
+        if n.flags & flags::CLOUD == 0 {
+            self.resize_file(id, n.size, 0);
+            self.nodes[id as usize].flags |= flags::CLOUD;
+        }
+    }
+
     /// A file became another name for a file counted elsewhere, so it now
     /// takes no space of its own (see [`flags::HARDLINK`]).
     pub fn mark_hard_link(&mut self, id: NodeId) {

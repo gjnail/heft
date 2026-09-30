@@ -46,12 +46,18 @@ impl HeftApp {
                 }
                 let _ = tx.send(list.clone());
                 ctx.request_repaint();
-                // The cleaner looks at this machine, so it has nothing to say about the demo disk.
-                if !demo && let Some(c) = recommend::cleaner_summary() {
-                    list.push(c);
-                    list.sort_by_key(|s| std::cmp::Reverse(s.bytes));
-                    let _ = tx.send(list);
-                    ctx.request_repaint();
+                // These look at this machine, so they have nothing to say about the demo disk.
+                if !demo {
+                    let before = list.len();
+                    list.extend(recommend::cleaner_summary());
+                    list.extend(recommend::local_snapshots(&t.root_path));
+                    #[cfg(target_os = "macos")]
+                    list.extend(recommend::icloud_downloads(&t, platform::now_unix()));
+                    if list.len() > before {
+                        list.sort_by_key(|s| std::cmp::Reverse(s.bytes));
+                        let _ = tx.send(list);
+                        ctx.request_repaint();
+                    }
                 }
             });
             self.suggest.running = Some(rx);
@@ -65,8 +71,15 @@ impl HeftApp {
                     self.suggest.checked.retain(|id| still.contains(id));
                     let first_run = self.suggest.list.is_empty();
                     for s in &list {
-                        if first_run && matches!(s.action, Do::Trash { preselect: true } | Do::Compress) {
-                            self.suggest.checked.extend(s.items.iter().copied());
+                        match s.action {
+                            // Anything with a warning waits for the user to tick it.
+                            Do::Trash { preselect: true } if first_run => self
+                                .suggest
+                                .checked
+                                .extend(s.items.iter().copied().filter(|&id| crate::risk::assess(&tree, id).is_none())),
+                            // Compressing removes nothing.
+                            Do::Compress if first_run => self.suggest.checked.extend(s.items.iter().copied()),
+                            _ => {}
                         }
                     }
                     self.suggest.list = list;
@@ -128,7 +141,8 @@ impl HeftApp {
         ui.add_space(4.0);
 
         match &s.action {
-            Do::Trash { .. } => {
+            Do::Trash { .. } | Do::RemoveDownload => {
+                let evict = matches!(s.action, Do::RemoveDownload);
                 let open = self.suggest.expanded.contains(&s.title);
                 let shown = if open { s.items.len() } else { s.items.len().min(PREVIEW) };
                 for &id in &s.items[..shown] {
@@ -142,10 +156,19 @@ impl HeftApp {
                         }
                     }
                     let chosen: Vec<NodeId> = s.items.iter().copied().filter(|i| self.suggest.checked.contains(i)).collect();
-                    let bytes: u64 = chosen.iter().map(|&i| tree.node(i).size).sum();
-                    let button = egui::Button::new(format!("Move {} selected to the {}… ({})", chosen.len(), platform::TRASH, fmt_size(bytes)));
-                    if ui.add_enabled(!chosen.is_empty(), button).clicked() {
-                        self.actions.push(Action::Delete(chosen));
+                    if evict {
+                        let bytes: u64 = chosen.iter().map(|&i| tree.node(i).alloc).sum();
+                        let button = egui::Button::new(format!("Remove {} download(s)… ({})", chosen.len(), fmt_size(bytes)));
+                        if ui.add_enabled(!chosen.is_empty(), button).clicked() {
+                            self.actions.push(Action::RemoveDownload(chosen));
+                        }
+                    } else {
+                        let bytes: u64 = chosen.iter().map(|&i| tree.node(i).size).sum();
+                        let button =
+                            egui::Button::new(format!("Move {} selected to the {}… ({})", chosen.len(), platform::TRASH, fmt_size(bytes)));
+                        if ui.add_enabled(!chosen.is_empty(), button).clicked() {
+                            self.actions.push(Action::Delete(chosen));
+                        }
                     }
                 });
             }
