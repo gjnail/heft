@@ -2,10 +2,12 @@
 //! the names and attributes of many entries at once, where `std::fs` needs a
 //! `readdir` plus an `lstat` for every entry.
 //!
-//! Every entry comes back in the same fixed layout because of
-//! `FSOPT_PACK_INVAL_ATTRS`: attributes that don't apply (file sizes for a
-//! folder, say) are packed as zeros instead of left out. If the call fails
-//! for a directory, that directory is listed through `std::fs` instead.
+//! Common attributes come back in the same fixed layout for every entry
+//! because of `FSOPT_PACK_INVAL_ATTRS`: ones that don't apply are packed as
+//! zeros instead of left out. File attributes are only packed for entries
+//! that aren't folders, so a folder's entry stops at `at::LINKCOUNT`. If the
+//! call fails for a directory, that directory is listed through `std::fs`
+//! instead.
 
 use std::ffi::{CString, OsStr};
 use std::io;
@@ -35,6 +37,7 @@ mod at {
     pub const MODTIME: usize = 44; // timespec: seconds, nanoseconds
     pub const FLAGS: usize = 60;
     pub const FILEID: usize = 64;
+    // File attributes, absent for folders
     pub const LINKCOUNT: usize = 72;
     pub const ALLOCSIZE: usize = 76;
     pub const DATALENGTH: usize = 84;
@@ -114,7 +117,8 @@ fn list_bulk(path: &Path, buf: &mut Vec<u8>) -> io::Result<(Vec<Entry>, u64, u64
         for _ in 0..n {
             let rest = buf.get(off..).unwrap_or(&[]);
             let len = u32_at(rest, at::LENGTH) as usize;
-            if len < at::END || len > rest.len() {
+            let fixed = if u32_at(rest, at::OBJTYPE) == VDIR { at::LINKCOUNT } else { at::END };
+            if len < fixed || len > rest.len() {
                 return Err(io::Error::other("malformed getattrlistbulk entry"));
             }
             if let Some((e, is_file)) = parse(&rest[..len]) {
@@ -172,7 +176,7 @@ fn parse(e: &[u8]) -> Option<(Entry, bool)> {
     // Same identity as `StdLister`: (st_dev, st_ino), for folders and for
     // files with more than one name.
     let dev = i32::from_ne_bytes(e[at::DEVID..at::DEVID + 4].try_into().ok()?) as u64;
-    let links = u32_at(e, at::LINKCOUNT);
+    let links = if is_dir { 0 } else { u32_at(e, at::LINKCOUNT) };
     let file_id = if is_dir || links > 1 { ((dev as u128) << 64) | u64_at(e, at::FILEID) as u128 } else { 0 };
     let entry = Entry {
         os_name: is_dir.then_some(os_name),
