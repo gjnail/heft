@@ -228,7 +228,22 @@ impl HeftApp {
         if n.flags & flags::SEEN != 0 {
             name.push_str("  (same folder as another path)");
         }
-        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(lay.name_end, rect.bottom()));
+        // Risk marker at the end of the name column; hover it for the reason.
+        let risk = if id == ROOT { None } else { crate::risk::assess(tree, id) };
+        let mut name_end = lay.name_end;
+        if let Some(r) = &risk {
+            let mark = Rect::from_center_size(pos2(lay.name_end - 8.0, cy), vec2(16.0, ROW_H));
+            p.text(mark.center(), Align2::CENTER_CENTER, "⚠", font.clone(), super::warnings::color(r.level));
+            name_end -= 18.0;
+            if resp.hover_pos().is_some_and(|pt| mark.contains(pt)) {
+                let r = *r;
+                resp.clone().on_hover_ui(|ui| {
+                    ui.set_max_width(360.0);
+                    super::warnings::explain(ui, &r);
+                });
+            }
+        }
+        let name_clip = Rect::from_min_max(pos2(x, rect.top()), pos2(name_end, rect.bottom()));
         p.with_clip_rect(name_clip.intersect(p.clip_rect())).text(
             pos2(x, cy),
             Align2::LEFT_CENTER,
@@ -309,6 +324,14 @@ impl HeftApp {
         if resp.hovered() {
             self.list_hover = Some(id);
         }
+        resp.widget_info(|| {
+            let kind = if n.is_dir() { "folder" } else { "file" };
+            let mut label = format!("{}, {kind}, {}", tree.name(id), fmt_size(n.size));
+            if let Some(r) = &risk {
+                label.push_str(&format!(". Warning: {}", r.title));
+            }
+            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label)
+        });
         resp.context_menu(|ui| self.node_menu(ui, tree, id));
     }
 }

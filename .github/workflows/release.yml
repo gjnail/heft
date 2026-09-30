@@ -1,0 +1,277 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows, macOS and Linux downloads
+# and opens a draft GitHub release with them. Running the workflow by hand
+# (Actions > Release > Run workflow) builds the downloads without a release.
+# See docs/releasing.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml"
+            exit 1
+          fi
+
+      # The release notes are the CHANGELOG.md section for this version.
+      - name: Release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v heading="## [$VERSION]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
+          fi
+          cat notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: notes.md
+
+  windows:
+    name: Windows
+    needs: version
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read # lets SignPath fetch the unsigned exe
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --release --locked
+
+      # build.rs only warns when it can't embed the icon, and .cargo/config.toml
+      # links the C runtime statically. Make sure both happened.
+      - name: Check the exe
+        shell: bash
+        run: |
+          exe=target/release/heft.exe
+          product=$(powershell -NoProfile -Command "(Get-Item $exe).VersionInfo.ProductVersion" | tr -d '\r')
+          if [ "$product" != "$VERSION" ]; then
+            echo "::error::heft.exe has product version '$product', expected $VERSION"
+            exit 1
+          fi
+          if grep -qai 'vcruntime140' "$exe"; then
+            echo "::error::heft.exe needs the Visual C++ runtime DLL"
+            exit 1
+          fi
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          target/release/heft.exe --bench . --out bench.txt
+          cat bench.txt
+          grep -q "^files" bench.txt
+
+      # Code signing through SignPath Foundation. It's skipped until the
+      # repository variable SIGNPATH_ORGANIZATION_ID and the secret
+      # SIGNPATH_API_TOKEN are set. Tags use the release certificate, and each
+      # request waits for approval in SignPath; runs started by hand use the
+      # test certificate. See docs/releasing.md.
+      - name: Upload unsigned exe
+        id: unsigned
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: target/release/heft.exe
+          archive: false
+
+      - name: Sign
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'heft' }}
+          signing-policy-slug: ${{ github.ref_type == 'tag' && 'release-signing' || 'test-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(env.VERSION) }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/signed
+          skip-decompress: true
+
+      - name: Use the signed exe
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature target/signed/heft.exe
+          "Signature: $($sig.Status), $($sig.SignerCertificate.Subject)"
+          # The test certificate isn't trusted, so only release signatures must be valid.
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $sig.Status -ne 'Valid') {
+            throw "heft.exe signature is $($sig.Status): $($sig.StatusMessage)"
+          }
+          Copy-Item target/signed/heft.exe target/release/heft.exe -Force
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Compress-Archive -Path target/release/heft.exe, LICENSE -DestinationPath "dist/heft-$env:VERSION-windows-x86_64.zip"
+
+      - name: winget manifests
+        shell: bash
+        run: bash scripts/winget-manifests.sh "$VERSION" "dist/heft-$VERSION-windows-x86_64.zip" winget
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-windows
+          path: dist/*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: winget-manifests
+          path: winget/*
+
+  macos:
+    name: macOS
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      HEFT_BUNDLE_ID: io.github.gjnail.heft
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - run: bash scripts/bundle-macos.sh
+
+      - name: Smoke test
+        run: |
+          target/Heft.app/Contents/MacOS/heft --bench . --out bench.txt
+          cat bench.txt
+          grep -q "^files" bench.txt
+
+      - name: Package
+        run: |
+          mkdir dist
+          ditto -c -k --keepParent target/Heft.app "dist/heft-$VERSION-macos-universal.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-macos
+          path: dist/*
+
+  linux:
+    name: Linux
+    needs: version
+    # An older Ubuntu, so the binary also runs on distributions with an older
+    # glibc (2.35 and later).
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --release --locked
+
+      - name: Smoke test
+        run: |
+          target/release/heft --bench . --out bench.txt
+          cat bench.txt
+          grep -q "^files" bench.txt
+
+      # scripts/install-linux.sh uses the included binary instead of building.
+      - name: Package
+        run: |
+          name=heft-$VERSION-linux-x86_64
+          mkdir -p "$name/scripts" "$name/packaging/linux" dist
+          cp target/release/heft LICENSE README.md "$name/"
+          cp scripts/install-linux.sh "$name/scripts/"
+          cp packaging/linux/heft.desktop "$name/packaging/linux/"
+          tar -czf "dist/$name.tar.gz" "$name"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-linux
+          path: dist/*
+
+  release:
+    name: Draft release
+    needs: [version, windows, macos, linux]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt
+
+      # Lets anyone check a download with `gh attestation verify`.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        run: |
+          if [ "$SIGNED" = true ]; then
+            signing="heft.exe is code-signed through [SignPath Foundation](https://signpath.org/). The macOS download isn't signed yet, so macOS warns the first time you open Heft."
+          else
+            signing="The downloads aren't code-signed yet, so Windows and macOS warn the first time you open Heft."
+          fi
+          cat >> notes.md <<EOF
+
+          ## Downloads
+
+          | System | File |
+          |---|---|
+          | Windows 10 and 11 (x64) | \`heft-$VERSION-windows-x86_64.zip\` |
+          | macOS 11 and later (Apple Silicon and Intel) | \`heft-$VERSION-macos-universal.zip\` |
+          | Linux (x86_64) | \`heft-$VERSION-linux-x86_64.tar.gz\` |
+
+          $signing The [install instructions](https://github.com/$GITHUB_REPOSITORY#install) explain how to open it anyway and how to check that a download was built from this repository.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Heft $VERSION" --notes-file notes.md

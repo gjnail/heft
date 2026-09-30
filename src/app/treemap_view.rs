@@ -1,5 +1,6 @@
 //! Interactive treemap: hover tooltips, click to select, double-click to
-//! drill in one level, right-click for actions.
+//! drill in one level, right-click for actions, arrow keys to move between
+//! neighbouring rectangles once it has keyboard focus.
 
 use std::sync::Arc;
 
@@ -17,6 +18,17 @@ impl HeftApp {
     pub(super) fn treemap_view(&mut self, ui: &mut egui::Ui) {
         let Some(tree) = self.tree.clone() else { return };
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
+        if resp.clicked() || resp.secondary_clicked() {
+            resp.request_focus();
+        }
+        // Keep arrow keys for moving around the map instead of egui's focus moves.
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                resp.id,
+                egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() },
+            )
+        });
+        self.treemap_focus = resp.has_focus();
         let ppp = ui.ctx().pixels_per_point();
         let px = [(rect.width() * ppp).round().max(1.0) as usize, (rect.height() * ppp).round().max(1.0) as usize];
 
@@ -28,6 +40,7 @@ impl HeftApp {
             mode: self.color_mode,
             highlight: self.highlight,
             diff_ptr: self.diff.as_ref().map(|d| Arc::as_ptr(d) as usize).unwrap_or(0),
+            by_alloc: self.size_by_alloc,
         };
         if self.render_key.as_ref() != Some(&key) {
             self.render_seq += 1;
@@ -43,6 +56,7 @@ impl HeftApp {
                     now: platform::now_unix(),
                     diff: self.diff.clone(),
                     highlight: self.highlight,
+                    by_alloc: self.size_by_alloc,
                 },
             });
             self.render_key = Some(key);
@@ -115,7 +129,29 @@ impl HeftApp {
             }
         }
 
+        if valid && self.show_labels {
+            draw_labels(&painter, &tree, r, &to_screen, self.size_by_alloc);
+        }
+        if self.treemap_focus {
+            painter.rect_stroke(rect, 0.0, Stroke::new(1.5, ui.visuals().selection.stroke.color), StrokeKind::Inside);
+        }
+        if valid
+            && self.treemap_focus
+            && let Some(n) = keyboard_target(ui, &tree, r, self.selected, self.view_root)
+        {
+            self.actions.push(Action::Reveal(n));
+        }
         self.legend(&painter, rect);
+
+        let view_name = tree.path(self.view_root);
+        let selected = self.selected.map(|s| format!("{}, {}", tree.name(s), fmt_size(tree.node(s).size)));
+        resp.widget_info(|| {
+            let mut label = format!("Treemap of {view_name}. Arrow keys move between items, Enter zooms in, Backspace zooms out.");
+            if let Some(s) = &selected {
+                label.push_str(&format!(" Selected: {s}."));
+            }
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, label)
+        });
 
         let mut resp = resp;
         if let Some(h) = self.hovered {
@@ -143,6 +179,10 @@ impl HeftApp {
         ui.set_max_width(460.0);
         ui.label(RichText::new(tree.name(id)).strong());
         ui.label(RichText::new(tree.path(id)).weak().size(11.5));
+        if let Some(r) = crate::risk::assess(tree, id) {
+            ui.add_space(3.0);
+            super::warnings::explain(ui, &r);
+        }
         ui.add_space(3.0);
         let view_size = tree.node(self.view_root).size;
         ui.label(format!("{}  ·  {:.2}% of this view", fmt_size(n.size), pct(n.size, view_size)));
@@ -208,6 +248,105 @@ impl HeftApp {
             painter.text(pos2(x + 16.0, bg.center().y), Align2::LEFT_CENTER, label, font.clone(), Color32::from_gray(230));
             x += w;
         }
+    }
+}
+
+/// Arrow keys pick the nearest rectangle at the same depth in that direction;
+/// with nothing selected they start at the biggest item.
+fn keyboard_target(
+    ui: &egui::Ui,
+    tree: &Tree,
+    r: &treemap::Rendered,
+    selected: Option<NodeId>,
+    view_root: NodeId,
+) -> Option<NodeId> {
+    let dir = ui.input(|i| {
+        if i.key_pressed(egui::Key::ArrowLeft) {
+            Some((-1.0, 0.0))
+        } else if i.key_pressed(egui::Key::ArrowRight) {
+            Some((1.0, 0.0))
+        } else if i.key_pressed(egui::Key::ArrowUp) {
+            Some((0.0, -1.0))
+        } else if i.key_pressed(egui::Key::ArrowDown) {
+            Some((0.0, 1.0))
+        } else {
+            None
+        }
+    })?;
+    let from = selected
+        .filter(|&s| s != view_root && tree.is_ancestor(view_root, s))
+        .and_then(|s| tree.ancestors(s).into_iter().rev().find_map(|a| r.rect_of(a)));
+    match from {
+        Some(f) => neighbour(r, &f, dir),
+        None => r.rects.iter().find(|t| t.depth == 1).map(|t| t.node),
+    }
+}
+
+/// Closest rectangle at `from`'s depth in direction `dir`, favouring ones
+/// straight ahead over ones off to the side.
+fn neighbour(r: &treemap::Rendered, from: &TmRect, dir: (f32, f32)) -> Option<NodeId> {
+    let centre = |t: &TmRect| ((t.x0 + t.x1) / 2.0, (t.y0 + t.y1) / 2.0);
+    let (cx, cy) = centre(from);
+    r.rects
+        .iter()
+        .filter(|t| t.depth == from.depth && t.node != from.node)
+        .filter_map(|t| {
+            let (x, y) = centre(t);
+            let (dx, dy) = (x - cx, y - cy);
+            let ahead = dx * dir.0 + dy * dir.1;
+            let side = (dx * dir.1 - dy * dir.0).abs();
+            (ahead > 1.0).then_some((ahead + 2.0 * side, t.node))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, n)| n)
+}
+
+/// Names on rectangles big enough to hold them: top-level items get "name
+/// size" in their top-left corner, big files deeper down get their name
+/// centred.
+fn draw_labels(
+    painter: &egui::Painter,
+    tree: &Tree,
+    r: &treemap::Rendered,
+    to_screen: &dyn Fn(&TmRect) -> Rect,
+    by_alloc: bool,
+) {
+    let font = FontId::proportional(12.0);
+    let mut drawn = 0;
+    for t in &r.rects {
+        if drawn >= 300 || t.depth == 0 {
+            continue;
+        }
+        let sr = to_screen(t);
+        let n = tree.node(t.node);
+        let top_level = t.depth == 1;
+        let (min_w, min_h) = if top_level { (70.0, 20.0) } else { (110.0, 34.0) };
+        if sr.width() < min_w || sr.height() < min_h || (!top_level && n.is_dir()) {
+            continue;
+        }
+        let size = if by_alloc { n.alloc } else { n.size };
+        let mut galley = painter.layout_no_wrap(
+            if top_level { format!("{}  {}", tree.name(t.node), fmt_size(size)) } else { tree.name(t.node).to_string() },
+            font.clone(),
+            Color32::WHITE,
+        );
+        if top_level && galley.size().x + 12.0 > sr.width() {
+            galley = painter.layout_no_wrap(tree.name(t.node).to_string(), font.clone(), Color32::WHITE);
+        }
+        let pad = vec2(4.0, 2.0);
+        let pos = if top_level {
+            sr.min + vec2(3.0, 3.0)
+        } else {
+            sr.center() - galley.size() / 2.0
+        };
+        let bg = Rect::from_min_size(pos - pad, galley.size() + pad * 2.0).intersect(sr.shrink(1.0));
+        if bg.width() < 24.0 {
+            continue;
+        }
+        let clipped = painter.with_clip_rect(bg);
+        clipped.rect_filled(bg, 3.0, Color32::from_black_alpha(150));
+        clipped.galley(pos, galley, Color32::WHITE);
+        drawn += 1;
     }
 }
 

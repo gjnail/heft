@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Build Heft and install it for the current user (no root needed):
-#   ~/.local/bin/heft, a desktop entry, and icons.
+# Install Heft for the current user (no root needed): ~/.local/bin/heft, a
+# desktop entry, and icons. In a source checkout this builds Heft first; in an
+# extracted release download it installs the included binary.
 # Uninstall: rm ~/.local/bin/heft ~/.local/share/applications/heft.desktop \
 #               ~/.local/share/icons/hicolor/*/apps/heft.png
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-cargo build --release
-
 target_dir="${CARGO_TARGET_DIR:-target}"
+if [ -f heft ] && [ -x heft ]; then
+    bin=heft
+else
+    cargo build --release
+    bin="$target_dir/release/heft"
+fi
 bin_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
 data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
 
-install -Dm755 "$target_dir/release/heft" "$bin_dir/heft"
+install -Dm755 "$bin" "$bin_dir/heft"
 
 for size in 48 64 128 256 512; do
     icon_dir="$data_dir/icons/hicolor/${size}x${size}/apps"

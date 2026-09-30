@@ -92,18 +92,22 @@ impl HeftApp {
                     ui.label(RichText::new("or drop one onto this window").weak());
                 });
 
-                #[cfg(windows)]
                 {
                     ui.add_space(28.0);
-                    ui.label(RichText::new("Or tidy up the PC").strong());
+                    let tidy = if cfg!(target_os = "macos") { "Or tidy up the Mac" } else { "Or tidy up the PC" };
+                    ui.label(RichText::new(tidy).strong());
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
+                        #[cfg(windows)]
                         let links = [
                             (super::Workspace::Cleaner, "Clean junk files"),
                             (super::Workspace::Startup, "Startup programs"),
                             (super::Workspace::Programs, "Uninstall and update programs"),
                         ];
-                        let w = 3.0 * 230.0 + 2.0 * 10.0;
+                        #[cfg(not(windows))]
+                        let links = [(super::Workspace::Cleaner, "Clean junk files")];
+                        let n = links.len() as f32;
+                        let w = n * 230.0 + (n - 1.0) * 10.0;
                         ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
                         for (ws, label) in links {
                             if ui.add(egui::Button::new(label).min_size(vec2(230.0, 34.0))).clicked() {
@@ -271,18 +275,21 @@ impl HeftApp {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             for (tab, label) in [
+                (Tab::Suggestions, "Suggestions"),
                 (Tab::Tree, "Folders"),
                 (Tab::Types, "File types"),
-                (Tab::Largest, "Largest files"),
+                (Tab::Search, "Search"),
                 (Tab::Duplicates, "Duplicates"),
                 (Tab::Junk, "Build junk"),
                 (Tab::Changes, "Changes"),
+                (Tab::Removed, "Removed"),
             ] {
                 let mut text = RichText::new(label);
                 if self.tab == tab {
                     text = text.strong();
                 }
                 let badge = match tab {
+                    Tab::Suggestions if self.suggest.count() > 0 => format!(" ({})", self.suggest.count()),
                     Tab::Duplicates if !self.dupes.groups.is_empty() => format!(" ({})", self.dupes.groups.len()),
                     Tab::Changes if self.diff.is_some() => " •".to_string(),
                     _ => String::new(),
@@ -296,12 +303,14 @@ impl HeftApp {
         ui.add_space(4.0);
         ui.separator();
         match self.tab {
+            Tab::Suggestions => self.suggestions_tab(ui),
             Tab::Tree => self.tree_view(ui),
             Tab::Types => self.types_tab(ui),
-            Tab::Largest => self.largest_tab(ui),
+            Tab::Search => self.search_tab(ui),
             Tab::Duplicates => self.dupes_tab(ui),
             Tab::Junk => self.junk_tab(ui),
             Tab::Changes => self.changes_tab(ui),
+            Tab::Removed => self.removed_tab(ui),
         }
     }
 

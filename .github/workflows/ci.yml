@@ -41,6 +41,19 @@ jobs:
             target/release/heft.exe
           if-no-files-found: ignore
 
+  fuzz:
+    name: Fuzz the MFT parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz for two minutes
+        run: cargo fuzz run mft_record -- -max_total_time=120
+
   macos-app:
     name: Heft.app (universal)
     runs-on: macos-latest

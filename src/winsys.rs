@@ -125,10 +125,13 @@ pub struct Launched(HANDLE);
 unsafe impl Send for Launched {}
 
 impl Launched {
-    /// Block until the process exits.
-    pub fn wait(self) {
+    /// Block until the process exits; returns its exit code.
+    pub fn wait(self) -> Option<u32> {
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+        let mut code = 0u32;
         unsafe {
-            windows_sys::Win32::System::Threading::WaitForSingleObject(self.0, u32::MAX);
+            WaitForSingleObject(self.0, u32::MAX);
+            (GetExitCodeProcess(self.0, &mut code) != 0).then_some(code)
         }
     }
 }
@@ -142,6 +145,15 @@ impl Drop for Launched {
 /// Start a program through the shell, so installers that need elevation get
 /// their UAC prompt. Returns a handle when Windows provides one.
 pub fn launch(file: &str, params: &str, elevate: bool) -> Result<Option<Launched>, String> {
+    shell_execute(file, params, elevate, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL)
+}
+
+/// Run a program as administrator (UAC prompt) with no window of its own.
+pub fn launch_elevated_hidden(file: &str, params: &str) -> Result<Option<Launched>, String> {
+    shell_execute(file, params, true, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE)
+}
+
+fn shell_execute(file: &str, params: &str, elevate: bool, show: i32) -> Result<Option<Launched>, String> {
     let verb = wide(if elevate { "runas" } else { "open" });
     let f = wide(file);
     let p = wide(params);
@@ -151,7 +163,7 @@ pub fn launch(file: &str, params: &str, elevate: bool) -> Result<Option<Launched
     info.lpVerb = verb.as_ptr();
     info.lpFile = f.as_ptr();
     info.lpParameters = if params.is_empty() { std::ptr::null() } else { p.as_ptr() };
-    info.nShow = windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    info.nShow = show;
     if unsafe { shell::ShellExecuteExW(&mut info) } == 0 {
         let e = std::io::Error::last_os_error();
         return Err(match e.raw_os_error() {

@@ -1,9 +1,15 @@
-//! The Windows maintenance workspaces: junk cleaner, startup programs,
-//! installed programs (uninstall + updates) and registry issues.
+//! The maintenance workspaces: the junk cleaner on every platform, plus
+//! startup programs, installed programs (uninstall + updates) and registry
+//! issues on Windows.
 
 mod cleaner;
+#[cfg(windows)]
+mod cleaner_win;
+#[cfg(windows)]
 mod programs;
+#[cfg(windows)]
 mod registry;
+#[cfg(windows)]
 mod startup;
 
 use eframe::egui::{self, vec2, Color32, Rect, Response, RichText};
@@ -14,6 +20,7 @@ use super::Workspace;
 pub enum Event {
     Toast(String, bool),
     /// Switch to Disk usage and scan this folder.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Scan(String),
     /// Restart elevated, reopening the current workspace.
     Elevate,
@@ -22,8 +29,11 @@ pub enum Event {
 pub struct Tools {
     elevated: bool,
     cleaner: cleaner::State,
+    #[cfg(windows)]
     startup: startup::State,
+    #[cfg(windows)]
     programs: programs::State,
+    #[cfg(windows)]
     registry: registry::State,
     events: Vec<Event>,
 }
@@ -33,8 +43,11 @@ impl Tools {
         Tools {
             elevated,
             cleaner: cleaner::State::new(),
+            #[cfg(windows)]
             startup: startup::State::default(),
+            #[cfg(windows)]
             programs: programs::State::default(),
+            #[cfg(windows)]
             registry: registry::State::default(),
             events: Vec::new(),
         }
@@ -44,9 +57,15 @@ impl Tools {
         let cx = Cx { elevated: self.elevated, events: &mut self.events };
         match ws {
             Workspace::Cleaner => self.cleaner.show(ui, cx),
+            #[cfg(windows)]
             Workspace::Startup => self.startup.show(ui, cx),
+            #[cfg(windows)]
             Workspace::Programs => self.programs.show(ui, cx),
+            #[cfg(windows)]
             Workspace::Registry => self.registry.show(ui, cx),
+            // Drawn by the app itself.
+            #[cfg(any(windows, target_os = "linux"))]
+            Workspace::Hardware => {}
             Workspace::Disk => {}
         }
     }
@@ -67,12 +86,13 @@ impl Cx<'_> {
         self.events.push(Event::Toast(msg.into(), is_error));
     }
 
-    /// A "needs administrator" notice with a restart button.
+    /// A "needs administrator" notice, with a restart button where Heft can
+    /// relaunch itself elevated.
     fn admin_notice(&mut self, ui: &mut egui::Ui, text: &str) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("🛡").color(Color32::from_rgb(250, 200, 70)));
             ui.label(RichText::new(text).weak());
-            if ui.small_button("Restart as administrator").clicked() {
+            if crate::platform::CAN_ELEVATE && ui.small_button("Restart as administrator").clicked() {
                 self.events.push(Event::Elevate);
             }
         });

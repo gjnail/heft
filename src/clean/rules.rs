@@ -4,10 +4,13 @@
 //! *.tmp" style guessing. Paths use `%VAR%` placeholders that are resolved at
 //! run time (see `super::resolve`); a rule whose variables can't be resolved
 //! is skipped rather than guessed.
+//!
+//! This file holds the Windows catalog; `rules_unix.rs` has macOS and Linux.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
 pub enum Group {
-    Windows,
+    /// The operating system itself: temp files, logs, caches.
+    System,
     Browsers,
     Apps,
     Developer,
@@ -15,11 +18,11 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Group; 5] = [Group::Windows, Group::Browsers, Group::Apps, Group::Developer, Group::Privacy];
+    pub const ALL: [Group; 5] = [Group::System, Group::Browsers, Group::Apps, Group::Developer, Group::Privacy];
 
     pub fn label(self) -> &'static str {
         match self {
-            Group::Windows => "Windows",
+            Group::System => super::SYSTEM,
             Group::Browsers => "Browsers",
             Group::Apps => "Applications",
             Group::Developer => "Developer tools",
@@ -36,17 +39,16 @@ pub enum Target {
     Older(&'static str, u32),
     /// Entries of a folder whose names match a `*` pattern (files, or whole
     /// subfolders).
+    #[cfg_attr(not(windows), allow(dead_code))]
     Glob(&'static str, &'static str),
     /// Chromium user-data folder + a path inside each profile in it
     /// (`Default`, `Profile 1`, …, and the folder itself for Opera).
+    #[cfg_attr(not(windows), allow(dead_code))]
     Chromium(&'static str, &'static str),
     /// A path inside every subfolder of a folder (Firefox profiles, IDEs).
     EachDir(&'static str, &'static str),
-    RecycleBin,
-    Clipboard,
-    DnsCache,
-    /// Every value of an HKCU key (MRU lists).
-    RegistryValues(&'static str),
+    /// Something only this OS has: the Recycle Bin, a package manager, …
+    Special(super::Special),
 }
 
 #[derive(Debug)]
@@ -68,10 +70,15 @@ pub struct Rule {
     pub targets: &'static [Target],
 }
 
+#[cfg(windows)]
+use super::Special::{Clipboard, DnsCache, RecycleBin, RegistryValues};
+#[cfg(windows)]
 use Group::*;
+#[cfg(windows)]
 use Target::*;
 
 /// Cache folders every Chromium-based browser (and Electron app) shares.
+#[cfg(windows)]
 macro_rules! chromium_cache {
     ($($ud:literal),+) => {
         &[$(
@@ -91,6 +98,7 @@ macro_rules! chromium_cache {
     };
 }
 
+#[cfg(windows)]
 macro_rules! chromium_cookies {
     ($ud:literal) => {
         &[
@@ -102,6 +110,7 @@ macro_rules! chromium_cookies {
     };
 }
 
+#[cfg(windows)]
 macro_rules! chromium_history {
     ($ud:literal) => {
         &[
@@ -116,6 +125,7 @@ macro_rules! chromium_history {
     };
 }
 
+#[cfg(windows)]
 macro_rules! chromium_session {
     ($ud:literal) => {
         &[
@@ -129,6 +139,7 @@ macro_rules! chromium_session {
 }
 
 /// Cache, cookies, history and session rules for one Chromium browser.
+#[cfg(windows)]
 macro_rules! chromium_browser {
     ($prefix:literal, $app:literal, $exe:literal, $cache:expr, $ud:literal) => {
         [
@@ -184,6 +195,7 @@ macro_rules! chromium_browser {
     };
 }
 
+#[cfg(windows)]
 const CHROME: [Rule; 4] = chromium_browser!(
     "chrome",
     "Google Chrome",
@@ -191,6 +203,7 @@ const CHROME: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\Google\Chrome\User Data"),
     r"%LOCALAPPDATA%\Google\Chrome\User Data"
 );
+#[cfg(windows)]
 const EDGE: [Rule; 4] = chromium_browser!(
     "edge",
     "Microsoft Edge",
@@ -198,6 +211,7 @@ const EDGE: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\Microsoft\Edge\User Data"),
     r"%LOCALAPPDATA%\Microsoft\Edge\User Data"
 );
+#[cfg(windows)]
 const BRAVE: [Rule; 4] = chromium_browser!(
     "brave",
     "Brave",
@@ -205,6 +219,7 @@ const BRAVE: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data"),
     r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data"
 );
+#[cfg(windows)]
 const VIVALDI: [Rule; 4] = chromium_browser!(
     "vivaldi",
     "Vivaldi",
@@ -212,6 +227,7 @@ const VIVALDI: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\Vivaldi\User Data"),
     r"%LOCALAPPDATA%\Vivaldi\User Data"
 );
+#[cfg(windows)]
 const OPERA: [Rule; 4] = chromium_browser!(
     "opera",
     "Opera",
@@ -219,6 +235,7 @@ const OPERA: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\Opera Software\Opera Stable", r"%APPDATA%\Opera Software\Opera Stable"),
     r"%APPDATA%\Opera Software\Opera Stable"
 );
+#[cfg(windows)]
 const OPERA_GX: [Rule; 4] = chromium_browser!(
     "operagx",
     "Opera GX",
@@ -226,6 +243,7 @@ const OPERA_GX: [Rule; 4] = chromium_browser!(
     chromium_cache!(r"%LOCALAPPDATA%\Opera Software\Opera GX Stable", r"%APPDATA%\Opera Software\Opera GX Stable"),
     r"%APPDATA%\Opera Software\Opera GX Stable"
 );
+#[cfg(windows)]
 const CHROMIUM: [Rule; 4] = chromium_browser!(
     "chromium",
     "Chromium",
@@ -234,6 +252,7 @@ const CHROMIUM: [Rule; 4] = chromium_browser!(
     r"%LOCALAPPDATA%\Chromium\User Data"
 );
 
+#[cfg(windows)]
 const FIREFOX: [Rule; 5] = [
     Rule {
         id: "firefox.cache",
@@ -313,10 +332,11 @@ const FIREFOX: [Rule; 5] = [
     },
 ];
 
+#[cfg(windows)]
 const WINDOWS: [Rule; 14] = [
     Rule {
         id: "win.temp",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Temporary files",
         about: "Files programs left in your temp folder. Only files untouched for 24 hours are removed, so running installers aren't disturbed.",
@@ -328,7 +348,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.systemp",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Windows temporary files",
         about: "The system-wide temp folder (files untouched for 24 hours).",
@@ -340,7 +360,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.recycle",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Recycle Bin",
         about: "Everything in the Recycle Bin on every drive.",
@@ -348,11 +368,11 @@ const WINDOWS: [Rule; 14] = [
         admin: false,
         warning: Some("Permanently deletes everything in the Recycle Bin."),
         close: &[],
-        targets: &[RecycleBin],
+        targets: &[Special(RecycleBin)],
     },
     Rule {
         id: "win.thumbs",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Thumbnail cache",
         about: "Explorer's picture and video previews. Rebuilt as you browse folders; files Explorer has open are skipped.",
@@ -364,7 +384,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.inetcache",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Internet cache",
         about: "Web cache used by Windows components, Internet Explorer mode and older apps.",
@@ -376,7 +396,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.reports",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Error reports & crash dumps",
         about: "Problem reports and application crash dumps for your account.",
@@ -388,7 +408,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.sysreports",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "System error reports",
         about: "Windows Error Reporting archives and queues for the whole PC.",
@@ -404,7 +424,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.memdumps",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Memory dumps",
         about: "Crash dumps Windows writes after a blue screen or a driver hang. Often several GB.",
@@ -420,7 +440,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.delivery",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Delivery Optimization cache",
         about: "Update files Windows keeps to share with other PCs.",
@@ -434,7 +454,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.logs",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Setup & servicing logs",
         about: "Component servicing (CBS) and DISM logs older than a week.",
@@ -446,7 +466,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.update",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "Windows Update downloads",
         about: "Update packages already downloaded. Also a common fix for stuck updates.",
@@ -458,7 +478,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.dxcache",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "DirectX shader cache",
         about: "Compiled graphics shaders. Rebuilt as games and apps need them.",
@@ -470,7 +490,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.gpucache",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "GPU driver shader caches",
         about: "NVIDIA, AMD and Intel driver shader caches.",
@@ -491,7 +511,7 @@ const WINDOWS: [Rule; 14] = [
     },
     Rule {
         id: "win.nvidia",
-        group: Windows,
+        group: System,
         app: "Windows",
         name: "NVIDIA driver downloads",
         about: "Driver installers the NVIDIA app downloaded and no longer needs.",
@@ -503,6 +523,7 @@ const WINDOWS: [Rule; 14] = [
     },
 ];
 
+#[cfg(windows)]
 const APPS: [Rule; 11] = [
     Rule {
         id: "app.discord",
@@ -683,6 +704,7 @@ const APPS: [Rule; 11] = [
     },
 ];
 
+#[cfg(windows)]
 const DEVELOPER: [Rule; 11] = [
     Rule {
         id: "dev.npm",
@@ -831,6 +853,7 @@ const DEVELOPER: [Rule; 11] = [
     },
 ];
 
+#[cfg(windows)]
 const PRIVACY: [Rule; 5] = [
     Rule {
         id: "priv.recent",
@@ -854,7 +877,7 @@ const PRIVACY: [Rule; 5] = [
         admin: false,
         warning: None,
         close: &[],
-        targets: &[RegistryValues(r"Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU")],
+        targets: &[Special(RegistryValues(r"Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"))],
     },
     Rule {
         id: "priv.typedpaths",
@@ -866,7 +889,7 @@ const PRIVACY: [Rule; 5] = [
         admin: false,
         warning: None,
         close: &[],
-        targets: &[RegistryValues(r"Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths")],
+        targets: &[Special(RegistryValues(r"Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"))],
     },
     Rule {
         id: "priv.clipboard",
@@ -878,7 +901,7 @@ const PRIVACY: [Rule; 5] = [
         admin: false,
         warning: None,
         close: &[],
-        targets: &[Clipboard],
+        targets: &[Special(Clipboard)],
     },
     Rule {
         id: "priv.dns",
@@ -890,30 +913,38 @@ const PRIVACY: [Rule; 5] = [
         admin: false,
         warning: None,
         close: &[],
-        targets: &[DnsCache],
+        targets: &[Special(DnsCache)],
     },
 ];
 
-/// All rules, in display order.
+/// All rules for this OS, in display order.
 pub fn all() -> &'static [Rule] {
     use std::sync::OnceLock;
     static ALL: OnceLock<Vec<Rule>> = OnceLock::new();
-    ALL.get_or_init(|| {
-        let mut v = Vec::new();
-        v.extend(WINDOWS);
-        v.extend(CHROME);
-        v.extend(EDGE);
-        v.extend(FIREFOX);
-        v.extend(BRAVE);
-        v.extend(OPERA);
-        v.extend(OPERA_GX);
-        v.extend(VIVALDI);
-        v.extend(CHROMIUM);
-        v.extend(APPS);
-        v.extend(DEVELOPER);
-        v.extend(PRIVACY);
-        v
-    })
+    ALL.get_or_init(catalog)
+}
+
+#[cfg(windows)]
+fn catalog() -> Vec<Rule> {
+    let mut v = Vec::new();
+    v.extend(WINDOWS);
+    v.extend(CHROME);
+    v.extend(EDGE);
+    v.extend(FIREFOX);
+    v.extend(BRAVE);
+    v.extend(OPERA);
+    v.extend(OPERA_GX);
+    v.extend(VIVALDI);
+    v.extend(CHROMIUM);
+    v.extend(APPS);
+    v.extend(DEVELOPER);
+    v.extend(PRIVACY);
+    v
+}
+
+#[cfg(unix)]
+fn catalog() -> Vec<Rule> {
+    super::rules_unix::catalog()
 }
 
 pub fn by_id(id: &str) -> Option<usize> {

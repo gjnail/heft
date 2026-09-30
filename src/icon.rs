@@ -1,5 +1,6 @@
 //! The app icon, a tiny cushion treemap, drawn at any size so the window
-//! icon and the packaged icons (Linux `.png`, macOS `.icns`) share one source.
+//! icon and the packaged icons (Windows `.ico` via `build.rs`, Linux `.png`,
+//! macOS `.icns`) share one source.
 
 /// Blocks on a 64-unit grid: (x0, y0, x1, y1, color).
 const BLOCKS: [(f32, f32, f32, f32, [u8; 3]); 5] = [

@@ -1,10 +1,13 @@
 //! Headless commands, handy for benchmarking and verifying the scanners.
 //!
-//!   heft --bench <path> [--walk] [--out <file>]
+//!   heft --bench <path> [--walk] [--json] [--out <file>]
+//!   heft --export <path> <out.csv|out.json> [--folders] [--walk]
 //!   heft --compare <path> [--out <file>]      MFT vs standard scan, side by side
 //!   heft --render <path> <out.png> [--size WxH] [--mode type|category|age] [--walk]
 //!   heft --icon <out.png> [--size N]            app icon, for packaging
-//!   heft --clean [--dry-run] [--out <file>]     junk cleaner with the saved selection (Windows)
+//!   heft --clean [--dry-run] [--out <file>]     junk cleaner with the saved selection
+//!   heft --check-refresh <drive>                 test change-journal rescans (Windows, admin)
+//!   heft --sensors [--rounds N]                 read every hardware sensor and print them (Windows, Linux)
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
@@ -18,7 +21,8 @@ use crate::util::{fmt_count, fmt_duration_ms, fmt_size};
 use crate::{colors, platform};
 
 pub fn is_cli_command(arg: &str) -> bool {
-    matches!(arg, "--bench" | "--compare" | "--render" | "--icon" | "--help") || (cfg!(windows) && arg == "--clean")
+    matches!(arg, "--bench" | "--export" | "--compare" | "--render" | "--icon" | "--help" | "--clean" | "--check-refresh")
+        || (cfg!(any(windows, target_os = "linux")) && arg == "--sensors")
 }
 
 pub fn run(args: &[String]) -> ExitCode {
@@ -32,7 +36,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 skip = false;
                 continue;
             }
-            if matches!(a.as_str(), "--out" | "--size" | "--mode") {
+            if matches!(a.as_str(), "--out" | "--size" | "--mode" | "--rounds") {
                 skip = true;
                 continue;
             }
@@ -46,8 +50,13 @@ pub fn run(args: &[String]) -> ExitCode {
     let mut out = String::new();
     let code = match args[0].as_str() {
         "--bench" => match positional.first() {
+            Some(p) if flag("--json") => bench_json(p, !flag("--walk"), &mut out),
             Some(p) => bench(p, !flag("--walk"), &mut out),
             None => usage(&mut out),
+        },
+        "--export" => match (positional.first(), positional.get(1)) {
+            (Some(p), Some(dest)) => export(p, dest, flag("--folders"), !flag("--walk"), &mut out),
+            _ => usage(&mut out),
         },
         "--compare" => match positional.first() {
             Some(p) => compare(p, &mut out),
@@ -70,8 +79,16 @@ pub fn run(args: &[String]) -> ExitCode {
             }
             None => usage(&mut out),
         },
-        #[cfg(windows)]
         "--clean" => clean(flag("--dry-run"), &mut out),
+        "--check-refresh" => match positional.first() {
+            Some(p) => check_refresh(p, &mut out),
+            None => usage(&mut out),
+        },
+        #[cfg(any(windows, target_os = "linux"))]
+        "--sensors" => {
+            let rounds = value("--rounds").and_then(|s| s.parse().ok()).unwrap_or(3u32).clamp(1, 600);
+            sensors(rounds, &mut out)
+        }
         _ => usage(&mut out),
     };
     print!("{out}");
@@ -85,22 +102,64 @@ fn usage(out: &mut String) -> ExitCode {
     out.push_str(
         "Heft, a disk usage analyzer\n\n\
          heft [path]                                 open the GUI (optionally scanning path)\n\
-         heft --bench <path> [--walk] [--out f]      scan and print a summary\n\
+         heft --bench <path> [--walk] [--json] [--out f]  scan and print a summary (JSON with --json)\n\
+         heft --export <path> <out.csv|out.json> [--folders]  scan and export every item as CSV, or a JSON summary\n\
          heft --compare <path> [--out f]             MFT vs standard scan, side by side\n\
          heft --render <path> <out.png> [--size WxH] [--mode type|category|age] [--walk]\n\
          heft --icon <out.png> [--size N]            write the app icon (for packaging)\n",
     );
-    #[cfg(windows)]
     out.push_str(
-        "heft --clean [--dry-run] [--out f]          run the junk cleaner with the selection saved in the GUI\n",
+        "heft --clean [--dry-run] [--out f]          run the junk cleaner with the selection saved in the GUI\n\
+         heft --check-refresh <drive> [--out f]      test change-journal rescans (Windows, as administrator)\n",
     );
+    #[cfg(any(windows, target_os = "linux"))]
+    out.push_str("heft --sensors [--rounds N] [--out f]       read every hardware sensor and print them\n");
     ExitCode::FAILURE
+}
+
+/// Every sensor after a few rounds (rates and power need two readings).
+#[cfg(any(windows, target_os = "linux"))]
+fn sensors(rounds: u32, out: &mut String) -> ExitCode {
+    use crate::sensors::{self, Driver, Kind};
+    let snap = sensors::collect(rounds, std::time::Duration::from_secs(1));
+    let driver = match &snap.driver {
+        Driver::NotNeeded => "not needed".to_string(),
+        Driver::NotInstalled => "PawnIO not installed".to_string(),
+        Driver::NeedsAdmin => "PawnIO installed, run as administrator to use it".to_string(),
+        Driver::Active(uses) => format!("PawnIO: {}", uses.join(", ")),
+        Driver::Failed(e) => e.clone(),
+    };
+    let _ = writeln!(out, "driver    {driver}");
+    let _ = writeln!(out, "read in   {} ms per round\n", snap.sample_cost.as_millis());
+    for d in &snap.devices {
+        let detail = if d.detail.is_empty() { String::new() } else { format!("  {}", d.detail) };
+        let _ = writeln!(out, "{}  [{}]{detail}", d.name, d.class.label());
+        for kind in Kind::ALL {
+            for s in d.of_kind(kind) {
+                let v = s.value.map(|v| kind.format(v, false)).unwrap_or_else(|| "-".into());
+                let _ = writeln!(
+                    out,
+                    "  {:<12} {:<26} {:>14}   min {:>14}  max {:>14}",
+                    kind.group(),
+                    s.label,
+                    v,
+                    kind.format(s.min, false),
+                    kind.format(s.max, false)
+                );
+            }
+        }
+        let _ = writeln!(out);
+    }
+    for n in &snap.notes {
+        let _ = writeln!(out, "note: {}", n.text);
+    }
+    ExitCode::SUCCESS
 }
 
 fn scan_blocking(path: &str, allow_mft: bool) -> Result<Tree, String> {
     let p = Progress::default();
     match scan::run(&scan::normalize_root(path), allow_mft, &p) {
-        ScanOutcome::Done(t) => Ok(t),
+        ScanOutcome::Done(t, _) => Ok(t),
         ScanOutcome::Cancelled => Err("cancelled".into()),
         ScanOutcome::Failed(e) => Err(e),
     }
@@ -136,6 +195,50 @@ fn summarize(t: &Tree, out: &mut String) {
     for e in exts.iter().take(10) {
         let name = if e.name.is_empty() { "(none)" } else { &e.name };
         let _ = writeln!(out, "  {:>10}  {:>10} files  .{}", fmt_size(e.size), fmt_count(e.count), name);
+    }
+}
+
+fn bench_json(path: &str, allow_mft: bool, out: &mut String) -> ExitCode {
+    match scan_blocking(path, allow_mft) {
+        Ok(t) => {
+            out.push_str(&crate::export::json_summary(&t, ROOT));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            let _ = writeln!(out, "{{\"error\": {}}}", crate::export::json_str(&e));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Scan `path` and write every item as CSV, or a JSON summary if `dest` ends
+/// in `.json`.
+fn export(path: &str, dest: &str, folders_only: bool, allow_mft: bool, out: &mut String) -> ExitCode {
+    let tree = match scan_blocking(path, allow_mft) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = writeln!(out, "error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = std::fs::File::create(dest).and_then(|f| {
+        let mut w = std::io::BufWriter::new(f);
+        if dest.to_lowercase().ends_with(".json") {
+            std::io::Write::write_all(&mut w, crate::export::json_summary(&tree, ROOT).as_bytes())?;
+        } else {
+            crate::export::csv(&tree, ROOT, folders_only, &mut w)?;
+        }
+        std::io::Write::flush(&mut w)
+    });
+    match result {
+        Ok(()) => {
+            let _ = writeln!(out, "wrote {dest}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            let _ = writeln!(out, "error writing {dest}: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -289,6 +392,7 @@ fn render(
             now: platform::now_unix(),
             diff: None,
             highlight: Highlight::None,
+            by_alloc: false,
         },
     };
     let r = treemap::render(&req);
@@ -307,7 +411,6 @@ fn render(
 
 /// Run the junk cleaner with the selection saved by the GUI. Used by the
 /// weekly scheduled task; `--dry-run` only reports what would go.
-#[cfg(windows)]
 fn clean(dry_run: bool, out: &mut String) -> ExitCode {
     use crate::clean::{self, rules};
     let t0 = Instant::now();
@@ -318,7 +421,7 @@ fn clean(dry_run: bool, out: &mut String) -> ExitCode {
     let mut found: Vec<clean::Found> = rx.try_iter().collect();
     found.sort_by_key(|f| std::cmp::Reverse(f.bytes));
 
-    let running = crate::winsys::running_processes();
+    let running = clean::running_processes();
     let (mut freed, mut removed, mut skipped) = (0u64, 0u64, 0u64);
     for f in &found {
         let r = &rules::all()[f.rule];
@@ -352,4 +455,133 @@ fn clean(dry_run: bool, out: &mut String) -> ExitCode {
         let _ = writeln!(out, "\nfreed {} · {} items removed · {} in use and left alone · {took}", fmt_size(freed), fmt_count(removed), fmt_count(skipped));
     }
     ExitCode::SUCCESS
+}
+
+/// Scan a drive, change some files in a scratch folder on it, bring the scan
+/// up to date from the change journal, and compare with a fresh full scan.
+/// Only the scratch folder it creates is touched, and it is removed after.
+#[cfg(windows)]
+fn check_refresh(path: &str, out: &mut String) -> ExitCode {
+    use crate::scan::RefreshOutcome;
+    use std::fs;
+
+    let root = scan::normalize_root(path);
+    let p = Progress::default();
+    let (tree, state) = match scan::run(&root, true, &p) {
+        ScanOutcome::Done(t, Some(s)) => (t, s),
+        ScanOutcome::Done(..) => {
+            let _ = writeln!(out, "no MFT scan (run as administrator on an NTFS drive)");
+            return ExitCode::FAILURE;
+        }
+        ScanOutcome::Cancelled => return ExitCode::FAILURE,
+        ScanOutcome::Failed(e) => {
+            let _ = writeln!(out, "scan failed: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut state = *state;
+    let _ = writeln!(out, "full scan   {} ({} files)", fmt_duration_ms(tree.info.duration_ms), fmt_count(tree.node(ROOT).files as u64));
+
+    let temp = std::env::temp_dir();
+    let base = if platform::names_eq(&scan::normalize_root(&temp.to_string_lossy())[..2], &root[..2]) {
+        temp
+    } else {
+        std::path::PathBuf::from(&root)
+    };
+    let dir = base.join(format!("heft-refresh-check-{}", std::process::id()));
+    let dir_s = dir.to_string_lossy().trim_end_matches('\\').to_string();
+    let write = || -> std::io::Result<u64> {
+        fs::create_dir_all(dir.join("sub").join("deeper"))?;
+        let mut total = 0;
+        for i in 0..40u64 {
+            let len = 1000 + i * 777;
+            fs::write(dir.join(format!("f{i}.bin")), vec![7u8; len as usize])?;
+            total += len;
+        }
+        fs::write(dir.join("sub").join("deeper").join("big.bin"), vec![1u8; 5 << 20])?;
+        total += 5 << 20;
+        // Rename, delete and grow a few, so the journal has more than creates.
+        fs::rename(dir.join("f1.bin"), dir.join("sub").join("moved.bin"))?;
+        fs::remove_file(dir.join("f2.bin"))?;
+        total -= 1000 + 2 * 777;
+        let mut grown = fs::read(dir.join("f3.bin"))?;
+        grown.extend(vec![9u8; 300_000]);
+        fs::write(dir.join("f3.bin"), grown)?;
+        total += 300_000;
+        Ok(total)
+    };
+    let expect = match write() {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&dir);
+            let _ = writeln!(out, "cannot write test files in {dir_s}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let mut ok = true;
+    let check = |label: &str, t: &Tree, want: Option<(u64, u32)>, out: &mut String| {
+        let got = t.find(&dir_s).map(|id| (t.node(id).size, t.node(id).files));
+        let pass = got == want;
+        let show = |v: Option<(u64, u32)>| v.map(|(s, f)| format!("{s} bytes, {f} files")).unwrap_or_else(|| "absent".into());
+        let _ = writeln!(out, "{label:<12}{}  (expected {})  {}", show(got), show(want), if pass { "ok" } else { "MISMATCH" });
+        pass
+    };
+
+    let t0 = Instant::now();
+    let refreshed = scan::refresh(&mut state, &p);
+    let refresh_ms = t0.elapsed().as_millis() as u64;
+    match &refreshed {
+        RefreshOutcome::Updated(t) => {
+            let _ = writeln!(out, "refresh     {} ({})", fmt_duration_ms(refresh_ms), t.info.note.clone().unwrap_or_default());
+            for (name, ms) in &t.info.phases {
+                let _ = writeln!(out, "  phase     {name:<26}{}", fmt_duration_ms(*ms));
+            }
+            ok &= check("refreshed", t, Some((expect, 40)), out);
+        }
+        RefreshOutcome::Unchanged => {
+            ok = false;
+            let _ = writeln!(out, "refresh saw no changes: MISMATCH");
+        }
+        RefreshOutcome::NeedFullScan(why) => {
+            ok = false;
+            let _ = writeln!(out, "refresh gave up: {why}");
+        }
+    }
+    if let (RefreshOutcome::Updated(t), Ok(full)) = (&refreshed, scan::mft_scan(&root, &p)) {
+        ok &= check("full scan", &full, Some((expect, 40)), out);
+        let (a, b) = (t.node(ROOT), full.node(ROOT));
+        let _ = writeln!(
+            out,
+            "whole drive refreshed {} / {} files, full {} / {} files (other programs may have written in between)",
+            fmt_size(a.size),
+            fmt_count(a.files as u64),
+            fmt_size(b.size),
+            fmt_count(b.files as u64)
+        );
+    }
+
+    let removed = fs::remove_dir_all(&dir);
+    if let Err(e) = &removed {
+        let _ = writeln!(out, "could not remove {dir_s}: {e}");
+    }
+    match scan::refresh(&mut state, &p) {
+        RefreshOutcome::Updated(t) => ok &= check("after rm", &t, None, out),
+        RefreshOutcome::Unchanged => {
+            ok = false;
+            let _ = writeln!(out, "second refresh saw no changes: MISMATCH");
+        }
+        RefreshOutcome::NeedFullScan(why) => {
+            ok = false;
+            let _ = writeln!(out, "second refresh gave up: {why}");
+        }
+    }
+    let _ = writeln!(out, "{}", if ok { "PASS" } else { "FAIL" });
+    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+#[cfg(not(windows))]
+fn check_refresh(_path: &str, out: &mut String) -> ExitCode {
+    let _ = writeln!(out, "change-journal rescans are Windows only");
+    ExitCode::FAILURE
 }

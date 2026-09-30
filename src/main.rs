@@ -1,25 +1,37 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
-#[cfg(windows)]
 mod clean;
 mod cli;
 mod colors;
+mod compress;
+mod dedupe;
 mod demo;
 mod devjunk;
 mod dupes;
+mod export;
 mod history;
 mod icon;
+mod monitor;
 mod platform;
+mod recommend;
+mod risk;
 #[cfg(windows)]
 mod programs;
 #[cfg(windows)]
 mod reg;
 #[cfg(windows)]
 mod regclean;
+mod relocate;
 mod scan;
+mod search;
+#[cfg(any(windows, target_os = "linux"))]
+mod sensors;
 #[cfg(windows)]
 mod startup;
+#[cfg(windows)]
+mod tray;
+mod trashlog;
 mod tree;
 mod treemap;
 mod util;

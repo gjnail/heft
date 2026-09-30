@@ -12,7 +12,6 @@ use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Rect, RichTe
 use super::{big_button, card, heading, row_background, share_bar, Cx, AMBER, GREEN};
 use crate::clean::{self, rules, rules::Group, Cleaned, Found};
 use crate::util::{fmt_count, fmt_duration_ms, fmt_size};
-use crate::winsys;
 
 const ROW_H: f32 = 24.0;
 
@@ -43,8 +42,8 @@ pub struct State {
     /// Rule whose files are listed, with the file order (largest first).
     detail: Option<(usize, Vec<u32>)>,
     confirm: bool,
-    schedule: Option<bool>,
-    schedule_job: Option<Receiver<bool>>,
+    #[cfg(windows)]
+    win: super::cleaner_win::WinExtras,
     started: bool,
     /// Every rule has reported at least once, so "found nothing" is known.
     analyzed_once: bool,
@@ -62,8 +61,8 @@ impl State {
             show_missing: false,
             detail: None,
             confirm: false,
-            schedule: None,
-            schedule_job: None,
+            #[cfg(windows)]
+            win: super::cleaner_win::WinExtras::new(),
             started: false,
             analyzed_once: false,
         }
@@ -94,7 +93,7 @@ impl State {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let (p, ctx) = (progress.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let running = winsys::running_processes();
+            let running = clean::running_processes();
             let out: Vec<Cleaned> = jobs.iter().map(|f| clean::clean(f, &running, &p)).collect();
             let _ = tx.send(out);
             ctx.request_repaint();
@@ -138,12 +137,8 @@ impl State {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
-        if let Some(rx) = &self.schedule_job
-            && let Ok(on) = rx.try_recv()
-        {
-            self.schedule = Some(on);
-            self.schedule_job = None;
-        }
+        #[cfg(windows)]
+        self.win.poll(ctx);
     }
 
     fn set_selected(&mut self, rule: usize, on: bool, cx: &mut Cx) {
@@ -170,11 +165,8 @@ impl State {
         if !self.started {
             self.started = true;
             self.start_analysis(&ctx);
-            let (tx, rx) = crossbeam_channel::bounded(1);
-            std::thread::spawn(move || {
-                let _ = tx.send(clean::schedule_enabled());
-            });
-            self.schedule_job = Some(rx);
+            #[cfg(windows)]
+            self.win.start(&ctx);
         }
         self.poll(&ctx);
 
@@ -185,6 +177,8 @@ impl State {
             });
         });
         self.confirm_modal(&ctx);
+        #[cfg(windows)]
+        self.win.modals(&ctx);
     }
 
     // ------------------------------------------------------------------
@@ -278,7 +272,7 @@ impl State {
         for &r in &members {
             let rule = &all[r];
             let siblings = members.iter().filter(|&&m| all[m].app == rule.app).count();
-            let under_app = siblings > 1 && rule.app != "Windows";
+            let under_app = siblings > 1 && rule.app != clean::SYSTEM;
             if under_app && rule.app != last_app {
                 ui.horizontal(|ui| {
                     ui.add_space(26.0);
@@ -286,7 +280,7 @@ impl State {
                 });
             }
             last_app = rule.app;
-            let label = if under_app || rule.app == "Windows" {
+            let label = if under_app || rule.app == clean::SYSTEM {
                 RichText::new(rule.name)
             } else {
                 RichText::new(format!("{} · {}", rule.app, rule.name))
@@ -458,8 +452,13 @@ impl State {
         }
 
         ui.add_space(14.0);
-        ui.separator();
-        self.footer(ui, cx);
+        #[cfg(windows)]
+        {
+            self.win.disks_ui(ui);
+            ui.add_space(14.0);
+            ui.separator();
+            self.win.footer(ui, cx);
+        }
     }
 
     fn results_table(&mut self, ui: &mut egui::Ui) {
@@ -567,50 +566,6 @@ impl State {
         });
     }
 
-    fn footer(&mut self, ui: &mut egui::Ui, cx: &mut Cx) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Automatic cleaning").strong());
-            match self.schedule {
-                None => {
-                    ui.spinner();
-                }
-                Some(mut on) => {
-                    let resp = ui
-                        .checkbox(&mut on, "Clean the selected items every Sunday")
-                        .on_hover_text("Adds a Windows scheduled task that runs `heft --clean` with the selection above.");
-                    if resp.changed() {
-                        match clean::set_schedule(on) {
-                            Ok(()) => {
-                                self.schedule = Some(on);
-                                cx.toast(if on { "Weekly cleaning scheduled" } else { "Weekly cleaning turned off" }, false);
-                            }
-                            Err(e) => cx.toast(format!("Could not change the schedule: {e}"), true),
-                        }
-                    }
-                }
-            }
-        });
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Windows' own tools").strong());
-            if ui.button("Storage Sense").on_hover_text("Settings › System › Storage").clicked() {
-                winsys::shell_open("ms-settings:storagesense");
-            }
-            if ui.button("Disk Cleanup").on_hover_text("Includes previous Windows installations (Windows.old)").clicked() {
-                winsys::shell_open("cleanmgr.exe");
-            }
-            let dism = ui.button("Component store cleanup").on_hover_text(
-                "Removes superseded Windows updates from WinSxS with DISM. Runs in a console window as administrator and can take a while.",
-            );
-            if dism.clicked() {
-                let args = "/c title Heft - component store cleanup & Dism.exe /Online /Cleanup-Image /StartComponentCleanup & echo. & pause";
-                if let Err(e) = winsys::launch("cmd.exe", args, true) {
-                    cx.toast(format!("Could not start DISM: {e}"), true);
-                }
-            }
-        });
-    }
-
     fn confirm_modal(&mut self, ctx: &egui::Context) {
         if !self.confirm {
             return;
@@ -622,6 +577,8 @@ impl State {
             .iter()
             .filter_map(|f| f.rule().warning.map(|w| format!("{} · {}: {w}", f.rule().app, f.rule().name)))
             .collect();
+        // Linux: system caches go through pkexec, which asks for a password.
+        let asks_password = !crate::platform::CAN_ELEVATE && ready.iter().any(|f| f.rule().admin);
         let mut go = false;
         let mut close = false;
         let resp = egui::Modal::new(egui::Id::new("confirm_clean")).show(ctx, |ui| {
@@ -631,8 +588,18 @@ impl State {
             ui.label(format!("{} · {} items in {} categories", fmt_size(bytes), fmt_count(items), ready.len()));
             ui.add_space(4.0);
             ui.label(
-                RichText::new("These files are deleted, not moved to the Recycle Bin. Programs recreate what they need.").weak(),
+                RichText::new(format!(
+                    "These files are deleted, not moved to the {}. Programs recreate what they need.",
+                    crate::platform::TRASH
+                ))
+                .weak(),
             );
+            if asks_password {
+                ui.label(
+                    RichText::new("System caches are cleaned by their own tools (apt, journalctl, snap), so you'll be asked for your password.")
+                        .weak(),
+                );
+            }
             if !warnings.is_empty() {
                 ui.add_space(6.0);
                 for w in &warnings {

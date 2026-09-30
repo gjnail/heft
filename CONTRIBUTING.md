@@ -21,6 +21,9 @@ change in that area:
    exists for that.
 6. Don't add network access. The only exception is winget, when the user asks
    for updates.
+7. When replacing or moving files, check the new copy against the original
+   (byte for byte, or by hash) before the original is replaced or removed, and
+   leave the original untouched if anything fails.
 
 ## Building and testing
 
@@ -40,9 +43,26 @@ example `%USERPROFILE%\.heft-target`. macOS and Linux need nothing else.
 `HEFT_DEMO=1 cargo run` opens Heft on a made-up disk. Use it for UI work and
 screenshots so real file names don't end up in issues or pull requests.
 
-Debug builds also read `HEFT_DEBUG_TAB`, `HEFT_DEBUG_ZOOM`,
-`HEFT_DEBUG_SELECT`, `HEFT_DEBUG_COLOR`, `HEFT_DEBUG_DUPES` and
-`HEFT_DEBUG_DIFF`, which open a given view after a scan.
+Debug builds also read `HEFT_DEBUG_TAB` (suggestions, tree, types, search,
+duplicates, junk, changes, removed), `HEFT_DEBUG_ZOOM`, `HEFT_DEBUG_SELECT`,
+`HEFT_DEBUG_COLOR`, `HEFT_DEBUG_DUPES` and `HEFT_DEBUG_DIFF`, which open a
+given view after a scan. `HEFT_DEBUG_SHARE` selects all but the oldest copy
+after a duplicate search and opens the Replace with links dialog;
+`HEFT_DEBUG_COMPRESS` and `HEFT_DEBUG_RELOCATE` open the Compress and Move
+dialogs; `HEFT_DEBUG_LOW` pretends every drive is almost full; and
+`HEFT_DEBUG_TRAY`, with `--tray`, runs through the notification-area icon on
+its own and logs the result to `heft-tray-selftest.txt` in the temp folder.
+`HEFT_HISTORY_DIR` and `HEFT_DATA_DIR` move scan history and the removed list
+somewhere else, so tests don't touch your own.
+
+Some tests change real system state, so they're ignored by default. `cargo
+test -- --ignored` moves a file to the Recycle Bin and restores it, shows a
+notification-area icon for a moment, and adds and removes the Start with
+Windows registry value.
+
+The MFT record parser has a fuzz target. With a nightly toolchain and
+`cargo install cargo-fuzz`, run `cargo fuzz run mft_record`; CI runs it for
+two minutes on every push.
 
 ### Other platforms
 
@@ -67,14 +87,25 @@ call them directly.
 ```
 src/
   main.rs               entry point, window setup
-  cli.rs                command line: --bench, --compare, --render, --clean, --icon
+  cli.rs                command line: --bench, --export, --compare, --check-refresh, --render, --clean, --icon
   demo.rs               the made-up demo disk (HEFT_DEMO)
   tree.rs               arena tree of the scan results
-  scan/mft.rs           NTFS master file table reader (Windows)
-  scan/walk/            parallel directory scanner, with Win32 and std::fs listers
+  scan/mft.rs           NTFS master file table reader and change journal rescans (Windows)
+  scan/mft_parse.rs     MFT record parsing, shared with the fuzz target
+  scan/walk/            parallel directory scanner, with Win32, getattrlistbulk and std::fs listers
   treemap.rs            treemap layout, shading and render thread
   history.rs            scan snapshots and the Changes comparison
   dupes.rs              duplicate finder
+  dedupe.rs             replacing duplicates with hard links or clones
+  compress.rs           NTFS folder compression (Windows)
+  relocate.rs           moving a folder to another drive and leaving a link
+  recommend.rs          the Suggestions page's rules
+  risk.rs               warnings for risky files and folders
+  search.rs             whole-scan search
+  export.rs             CSV and JSON export
+  trashlog.rs           the Removed page's log, and restoring from the trash
+  monitor.rs            free space alerts
+  tray.rs               notification-area icon and Start with Windows (Windows)
   devjunk.rs            build junk detection
   colors.rs             file categories and color schemes
   icon.rs               app icon, drawn at any size
@@ -85,10 +116,18 @@ src/
   regclean.rs, reg.rs   registry issues, registry access and .reg backups (Windows)
   winget.rs             updates through winget (Windows)
   winsys.rs             Windows helpers for the maintenance tools
-  app/                  user interface; tools/ holds the Windows maintenance pages
+  sensors/              hardware sensors: sampling thread and history, win/ and linux.rs backends
+  app/                  user interface; tools/ holds the Windows maintenance pages, hardware/ the sensor page
+assets/pawnio/          PawnIO driver modules used for CPU and motherboard sensors (LGPL-2.1)
+build.rs                embeds the icon and version details in heft.exe
+fuzz/                   cargo-fuzz target for the MFT record parser
 packaging/linux/        desktop entry
-scripts/                macOS app bundle and Linux install scripts
+packaging/windows/      SignPath code signing configuration
+scripts/                macOS app bundle, Linux install and winget manifest scripts
 ```
+
+Releases are built by GitHub Actions; [docs/releasing.md](docs/releasing.md)
+has the steps.
 
 ## Pull requests
 

@@ -296,6 +296,41 @@ impl Tree {
         self.version += 1;
     }
 
+    /// Change a file's size and allocation in place (after it was
+    /// compressed, say) and fix up its ancestors.
+    pub fn resize_file(&mut self, id: NodeId, size: u64, alloc: u64) {
+        let node = self.nodes[id as usize];
+        if node.is_dir() || node.flags & flags::DELETED != 0 {
+            return;
+        }
+        let e = &mut self.exts[node.ext as usize];
+        e.size = (e.size + size).saturating_sub(node.size);
+        e.alloc = (e.alloc + alloc).saturating_sub(node.alloc);
+        self.nodes[id as usize].size = size;
+        self.nodes[id as usize].alloc = alloc;
+        let mut cur = node.parent;
+        loop {
+            let n = &mut self.nodes[cur as usize];
+            n.size = (n.size + size).saturating_sub(node.size);
+            n.alloc = (n.alloc + alloc).saturating_sub(node.alloc);
+            self.sort_children(cur);
+            if cur == ROOT {
+                break;
+            }
+            cur = self.nodes[cur as usize].parent;
+        }
+        self.version += 1;
+    }
+
+    /// A file became another name for a file counted elsewhere, so it now
+    /// takes no space of its own (see [`flags::HARDLINK`]).
+    pub fn mark_hard_link(&mut self, id: NodeId) {
+        if self.nodes[id as usize].flags & flags::HARDLINK == 0 {
+            self.resize_file(id, 0, 0);
+            self.nodes[id as usize].flags |= flags::HARDLINK;
+        }
+    }
+
     fn sort_children(&mut self, id: NodeId) {
         let n = self.nodes[id as usize];
         let range = n.child_start as usize..(n.child_start + n.child_count) as usize;
@@ -509,6 +544,21 @@ pub(crate) mod tests {
         let mp4 = t.exts.iter().find(|e| e.name == "mp4").unwrap();
         assert_eq!((mp4.size, mp4.count), (50, 1));
         assert!(t.find(&p(&["a", "big.MP4"])).is_none());
+    }
+
+    #[test]
+    fn resize_and_hard_link() {
+        let mut t = sample();
+        let big = t.find(&p(&["a", "big.MP4"])).unwrap();
+        t.resize_file(big, 100, 40);
+        assert_eq!((t.node(ROOT).size, t.node(ROOT).alloc), (160, 104));
+        let mid = t.find(&p(&["c", "mid.mp4"])).unwrap();
+        t.mark_hard_link(mid);
+        t.mark_hard_link(mid);
+        assert_eq!((t.node(ROOT).size, t.node(ROOT).files), (110, 3));
+        assert_ne!(t.node(mid).flags & flags::HARDLINK, 0);
+        let mp4 = t.exts.iter().find(|e| e.name == "mp4").unwrap();
+        assert_eq!((mp4.size, mp4.alloc, mp4.count), (100, 40, 2));
     }
 
     #[test]

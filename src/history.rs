@@ -191,6 +191,35 @@ pub fn load(meta: &SnapMeta) -> Result<Snapshot, String> {
     Ok(Snapshot { meta, entries })
 }
 
+/// Size of the folder at `rel` (path components below the scan root) in each
+/// saved snapshot of `root`, oldest first. Snapshots where the folder didn't
+/// exist are skipped.
+pub fn size_history(root: &str, rel: &[String]) -> Vec<(i64, u64)> {
+    let keys: Vec<String> = rel.iter().map(|c| platform::name_key(c).into_owned()).collect();
+    let mut out: Vec<(i64, u64)> = list(root)
+        .iter()
+        .filter_map(|meta| {
+            let snap = load(meta).ok()?;
+            let idx = find_entry(&snap, &keys)?;
+            Some((meta.taken_at, snap.entries[idx].size))
+        })
+        .collect();
+    out.sort_by_key(|p| p.0);
+    out
+}
+
+/// Index of the entry at `keys` (name keys below the root), if recorded.
+fn find_entry(snap: &Snapshot, keys: &[String]) -> Option<usize> {
+    let mut cur = 0usize;
+    snap.entries.first()?;
+    for key in keys {
+        // Entries are in breadth-first order, so children come after their parent.
+        cur = (cur + 1..snap.entries.len())
+            .find(|&i| snap.entries[i].parent == cur as u32 && platform::name_key(&snap.entries[i].name) == key.as_str())?;
+    }
+    Some(cur)
+}
+
 fn write_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u16).to_le_bytes());
     out.extend_from_slice(s.as_bytes());
@@ -412,6 +441,10 @@ mod tests {
         let listed = list(root());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].total_size, before.node(ROOT).size);
+        assert_eq!(size_history(root(), &["Games".into()]), vec![(1000, 100 << 20)]);
+        // Case only matters where the file system cares about it.
+        assert_eq!(size_history(root(), &["games".into()]).len(), usize::from(platform::CASE_INSENSITIVE));
+        assert!(size_history(root(), &["Nope".into()]).is_empty());
 
         let snap = load(&meta).unwrap();
         let after = tree(true, 2000);

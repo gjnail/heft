@@ -18,7 +18,7 @@ const DRIVE_REMOTE: u32 = 4;
 const DRIVE_CDROM: u32 = 5;
 const DRIVE_RAMDISK: u32 = 6;
 
-fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
+pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
     s.as_ref().encode_wide().chain(std::iter::once(0)).collect()
 }
 
@@ -52,6 +52,14 @@ pub fn list_drives() -> Vec<DriveInfo> {
         out.push(DriveInfo { root, label, fs: fsname, kind, total, free });
     }
     out
+}
+
+/// The root of the volume holding `path`: `C:\`, or a mounted folder.
+pub fn volume_root(path: &Path) -> Option<String> {
+    let w = wide(path.as_os_str());
+    let mut root = [0u16; 1024];
+    let ok = unsafe { fs::GetVolumePathNameW(w.as_ptr(), root.as_mut_ptr(), root.len() as u32) };
+    (ok != 0).then(|| from_wide(&root))
 }
 
 /// (label, filesystem name) for a volume root like `C:\`.

@@ -3,6 +3,7 @@
 
 #[cfg(windows)]
 pub mod mft;
+pub mod mft_parse;
 pub mod walk;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -43,8 +44,44 @@ impl Progress {
     }
 }
 
+/// What an MFT scan keeps for quick rescans through the change journal.
+#[cfg(windows)]
+pub type Incremental = mft::MftState;
+
+/// Never created: only NTFS on Windows supports incremental rescans.
+#[cfg(not(windows))]
+pub struct Incremental(std::convert::Infallible);
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum RefreshOutcome {
+    Unchanged,
+    Updated(Tree),
+    /// The journal can't bring the scan up to date; do a full scan.
+    NeedFullScan(String),
+}
+
+/// Bring a finished MFT scan up to date from the NTFS change journal.
+#[cfg(windows)]
+pub fn refresh(state: &mut Incremental, progress: &Progress) -> RefreshOutcome {
+    let t0 = Instant::now();
+    match mft::refresh(state, progress) {
+        Ok(None) => RefreshOutcome::Unchanged,
+        Ok(Some(mut tree)) => {
+            tree.info.duration_ms = t0.elapsed().as_millis() as u64;
+            tree.info.finished_at = platform::now_unix();
+            RefreshOutcome::Updated(tree)
+        }
+        Err(e) => RefreshOutcome::NeedFullScan(e),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn refresh(state: &mut Incremental, _progress: &Progress) -> RefreshOutcome {
+    match state.0 {}
+}
+
 pub enum ScanOutcome {
-    Done(Tree),
+    Done(Tree, Option<Box<Incremental>>),
     Cancelled,
     Failed(String),
 }
@@ -122,6 +159,16 @@ pub fn mft_scan(_root: &str, _progress: &Progress) -> Result<Tree, String> {
     Err("not supported on this platform".into())
 }
 
+#[cfg(windows)]
+fn mft_scan_with_state(root: &str, progress: &Progress) -> Result<(Tree, Option<Box<Incremental>>), String> {
+    mft::scan_with_state(root, progress).map(|(t, s)| (t, Some(Box::new(s))))
+}
+
+#[cfg(not(windows))]
+fn mft_scan_with_state(_root: &str, _progress: &Progress) -> Result<(Tree, Option<Box<Incremental>>), String> {
+    Err("not supported on this platform".into())
+}
+
 pub fn start(root: &str, allow_mft: bool, on_done: impl Fn() + Send + 'static) -> ScanHandle {
     let root = normalize_root(root);
     let progress = Arc::new(Progress::default());
@@ -145,13 +192,17 @@ pub fn run(root: &str, allow_mft: bool, progress: &Progress) -> ScanOutcome {
     let t0 = Instant::now();
     let mut note = None;
     let mut result = None;
+    let mut state = None;
 
     if allow_mft {
         match mft_unavailable_reason(root) {
             None => {
                 *progress.mode.lock().unwrap() = Some(ScanMode::Mft);
-                match mft_scan(root, progress) {
-                    Ok(t) => result = Some(t),
+                match mft_scan_with_state(root, progress) {
+                    Ok((t, s)) => {
+                        result = Some(t);
+                        state = s;
+                    }
                     Err(e) => note = Some(format!("Fast MFT scan failed ({e}); used a standard scan instead.")),
                 }
             }
@@ -184,7 +235,7 @@ pub fn run(root: &str, allow_mft: bool, progress: &Progress) -> ScanOutcome {
             if tree.info.note.is_none() {
                 tree.info.note = note;
             }
-            ScanOutcome::Done(tree)
+            ScanOutcome::Done(tree, state)
         }
         Err(e) => ScanOutcome::Failed(e),
     }

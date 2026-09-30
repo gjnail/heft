@@ -1,11 +1,22 @@
 //! Application state and top-level layout.
 
+#[cfg(any(windows, target_os = "linux"))]
+mod hardware;
 mod screens;
+mod alerts_view;
+mod compress_view;
+mod live;
+mod relocate_view;
+mod removed_view;
+mod search_view;
+mod share_view;
+mod suggest_view;
+mod trend_view;
 mod tabs;
-#[cfg(windows)]
 mod tools;
 mod tree_view;
 mod treemap_view;
+mod warnings;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,20 +36,24 @@ use crate::util::{fmt_count, fmt_duration_ms, fmt_size};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
+    Suggestions,
     Tree,
     Types,
-    Largest,
+    Search,
     Duplicates,
     Junk,
     Changes,
+    Removed,
 }
 
-/// The top-level pages. Disk usage everywhere; the maintenance tools are
-/// Windows-only.
+/// The top-level pages. Disk usage and the cleaner everywhere; startup,
+/// programs and registry tools are Windows-only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Workspace {
     Disk,
-    #[cfg(windows)]
+    /// Sensors: Windows and Linux (macOS has no backend yet).
+    #[cfg(any(windows, target_os = "linux"))]
+    Hardware,
     Cleaner,
     #[cfg(windows)]
     Startup,
@@ -50,16 +65,30 @@ pub enum Workspace {
 
 impl Workspace {
     #[cfg(windows)]
-    const ALL: [Workspace; 5] =
-        [Workspace::Disk, Workspace::Cleaner, Workspace::Startup, Workspace::Programs, Workspace::Registry];
+    const ALL: [Workspace; 6] = [
+        Workspace::Disk,
+        Workspace::Hardware,
+        Workspace::Cleaner,
+        Workspace::Startup,
+        Workspace::Programs,
+        Workspace::Registry,
+    ];
+    #[cfg(target_os = "linux")]
+    const ALL: [Workspace; 3] = [Workspace::Disk, Workspace::Hardware, Workspace::Cleaner];
+    #[cfg(not(any(windows, target_os = "linux")))]
+    const ALL: [Workspace; 2] = [Workspace::Disk, Workspace::Cleaner];
 
-    #[cfg(windows)]
     fn label(self) -> &'static str {
         match self {
             Workspace::Disk => "Disk usage",
+            #[cfg(any(windows, target_os = "linux"))]
+            Workspace::Hardware => "Hardware",
             Workspace::Cleaner => "Cleaner",
+            #[cfg(windows)]
             Workspace::Startup => "Startup",
+            #[cfg(windows)]
             Workspace::Programs => "Programs",
+            #[cfg(windows)]
             Workspace::Registry => "Registry",
         }
     }
@@ -68,7 +97,8 @@ impl Workspace {
     fn key(self) -> &'static str {
         match self {
             Workspace::Disk => "disk",
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
+            Workspace::Hardware => "hardware",
             Workspace::Cleaner => "cleaner",
             #[cfg(windows)]
             Workspace::Startup => "startup",
@@ -80,11 +110,15 @@ impl Workspace {
     }
 
     fn from_key(key: &str) -> Option<Workspace> {
-        #[cfg(windows)]
-        return Workspace::ALL.into_iter().find(|w| w.key() == key);
-        #[cfg(not(windows))]
-        return (key == "disk").then_some(Workspace::Disk);
+        Workspace::ALL.into_iter().find(|w| w.key() == key)
     }
+}
+
+#[derive(Clone, Copy)]
+enum Export {
+    CsvAll,
+    CsvFolders,
+    Json,
 }
 
 struct JunkState {
@@ -105,6 +139,8 @@ pub enum Action {
     ShowInFileManager(NodeId),
     CopyPath(NodeId),
     Delete(Vec<NodeId>),
+    Compress(Vec<NodeId>),
+    Relocate(NodeId),
     ScanPath(String),
     Rescan,
     SetHighlight(Highlight),
@@ -119,13 +155,7 @@ struct RenderKey {
     mode: ColorMode,
     highlight: Highlight,
     diff_ptr: usize,
-}
-
-struct LargestState {
-    filter: String,
-    min_age_days: u32,
-    results: Vec<NodeId>,
-    key: Option<(usize, u64, NodeId, String, u32)>,
+    by_alloc: bool,
 }
 
 struct DupState {
@@ -188,13 +218,29 @@ pub struct HeftApp {
     render_seq: u64,
     color_mode: ColorMode,
     highlight: Highlight,
+    /// Treemap rectangles sized by space on disk rather than file size.
+    size_by_alloc: bool,
+    show_labels: bool,
+    /// The treemap had keyboard focus last frame (arrow keys move within it).
+    treemap_focus: bool,
+    /// A text field had focus last frame, so keys belong to it.
+    typing: bool,
 
     workspace: Workspace,
-    #[cfg(windows)]
     tools: tools::Tools,
+    #[cfg(any(windows, target_os = "linux"))]
+    hardware: hardware::Hardware,
 
     tab: Tab,
-    largest: LargestState,
+    search: search_view::SearchState,
+    suggest: suggest_view::SuggestState,
+    trend: trend_view::TrendState,
+    removed: removed_view::RemovedState,
+    live: live::LiveState,
+    share: share_view::ShareState,
+    compress: compress_view::CompressState,
+    relocate: relocate_view::RelocateState,
+    alerts: alerts_view::AlertState,
     dupes: DupState,
     junk: JunkState,
 
@@ -206,8 +252,12 @@ pub struct HeftApp {
     hotspots_key: Option<(u64, NodeId, usize)>,
 
     confirm_delete: Option<Vec<NodeId>>,
+    /// Ticked "I understand" for dangerous items in the delete dialog.
+    delete_ack: bool,
     delete_job: Option<DeleteJob>,
     toast: Option<(String, Instant, bool)>,
+    /// Messages from background jobs (exports and so on), shown as toasts.
+    notices: (crossbeam_channel::Sender<(String, bool)>, Receiver<(String, bool)>),
     actions: Vec<Action>,
     /// Showing made-up data (`HEFT_DEMO`), so leave scan history alone.
     demo: bool,
@@ -224,6 +274,8 @@ impl HeftApp {
             _ => ColorMode::Extension,
         };
         let use_mft = get("use_mft").as_deref() != Some("0");
+        let size_by_alloc = get("size_by").as_deref() == Some("disk");
+        let show_labels = get("labels").as_deref() != Some("0");
         let workspace = std::env::args()
             .find_map(|a| a.strip_prefix("--open=").and_then(Workspace::from_key))
             .unwrap_or(Workspace::Disk);
@@ -255,11 +307,30 @@ impl HeftApp {
             render_seq: 0,
             color_mode,
             highlight: Highlight::None,
+            size_by_alloc,
+            show_labels,
+            treemap_focus: false,
+            typing: false,
             workspace,
-            #[cfg(windows)]
             tools: tools::Tools::new(elevated),
-            tab: Tab::Tree,
-            largest: LargestState { filter: String::new(), min_age_days: 0, results: Vec::new(), key: None },
+            #[cfg(any(windows, target_os = "linux"))]
+            hardware: hardware::Hardware::new(cc.storage),
+            tab: Tab::Suggestions,
+            search: search_view::SearchState::default(),
+            suggest: suggest_view::SuggestState::default(),
+            trend: trend_view::TrendState::default(),
+            removed: removed_view::RemovedState::default(),
+            share: share_view::ShareState::default(),
+            compress: compress_view::CompressState::default(),
+            relocate: relocate_view::RelocateState::default(),
+            alerts: alerts_view::AlertState::new(
+                &cc.egui_ctx,
+                get("alerts").as_deref() != Some("0"),
+                get("alert_limit").and_then(|g| g.parse::<u64>().ok()).unwrap_or(10) << 30,
+                get("background").as_deref() == Some("1") || std::env::args().any(|a| a == "--tray"),
+                cfg!(windows) && std::env::args().any(|a| a == "--tray"),
+            ),
+            live: live::LiveState::new(get("auto_update").as_deref() == Some("1")),
             junk: JunkState { results: Vec::new(), checked: HashSet::new(), key: None },
             dupes: DupState {
                 min_size: 1 << 20,
@@ -277,15 +348,17 @@ impl HeftApp {
             hotspots: Vec::new(),
             hotspots_key: None,
             confirm_delete: None,
+            delete_ack: false,
             delete_job: None,
             toast: None,
+            notices: crossbeam_channel::unbounded(),
             actions: Vec::new(),
             demo: false,
         };
         app.refresh_drives();
         if std::env::var_os("HEFT_DEMO").is_some() {
             app.demo = true;
-            app.set_tree(crate::demo::tree());
+            app.set_tree(crate::demo::tree(), false);
             #[cfg(debug_assertions)]
             app.apply_debug_env(&cc.egui_ctx);
         } else if let Some(path) = initial {
@@ -300,14 +373,18 @@ impl HeftApp {
     }
 
     fn start_scan(&mut self, root: &str, ctx: &egui::Context) {
+        self.live.state = None;
         self.workspace = Workspace::Disk;
         let ctx = ctx.clone();
         self.error = None;
         self.scan = Some(scan::start(root, self.use_mft, move || ctx.request_repaint()));
     }
 
-    fn set_tree(&mut self, t: Tree) {
+    /// Show a new scan. `save_history` is off for automatic updates, which
+    /// shouldn't add a snapshot every few seconds.
+    fn set_tree(&mut self, t: Tree, save_history: bool) {
         let tree = Arc::new(t);
+        self.suggest = suggest_view::SuggestState::default();
         self.ext_colors = Arc::new(colors::extension_colors(&tree.exts));
         self.view_root = ROOT;
         self.selected = None;
@@ -316,7 +393,7 @@ impl HeftApp {
         self.rows_dirty = true;
         self.render_key = None;
         self.highlight = Highlight::None;
-        self.largest.key = None;
+        self.search.invalidate();
         self.junk.key = None;
         self.junk.checked.clear();
         self.dupes.groups.clear();
@@ -339,6 +416,8 @@ impl HeftApp {
             self.snapshots.clear();
         } else {
             self.snapshots = history::list(&tree.root_path);
+        }
+        if !self.demo && save_history {
             let for_save = tree.clone();
             std::thread::spawn(move || {
                 let _ = history::save(&for_save);
@@ -365,7 +444,9 @@ impl HeftApp {
         if let Some(t) = env("HEFT_DEBUG_TAB") {
             self.tab = match t.as_str() {
                 "types" => Tab::Types,
-                "largest" => Tab::Largest,
+                "largest" | "search" => Tab::Search,
+                "suggestions" => Tab::Suggestions,
+                "removed" => Tab::Removed,
                 "duplicates" => Tab::Duplicates,
                 "junk" => Tab::Junk,
                 "changes" => Tab::Changes,
@@ -386,8 +467,19 @@ impl HeftApp {
                 _ => ColorMode::Extension,
             };
         }
+        if let Some(id) = env("HEFT_DEBUG_DELETE").and_then(|p| tree.find(&p)) {
+            self.actions.push(Action::Delete(vec![id]));
+        }
         if env("HEFT_DEBUG_DUPES").is_some() {
             self.start_dupes(ctx);
+        }
+        if env("HEFT_DEBUG_COMPRESS").is_some() {
+            self.open_compress(&[self.view_root]);
+        }
+        if env("HEFT_DEBUG_RELOCATE").is_some()
+            && let Some(&first) = self.tree.as_ref().and_then(|t| t.children(ROOT).first())
+        {
+            self.open_relocate(first);
         }
         if env("HEFT_DEBUG_DIFF").is_some() && !self.snapshots.is_empty() {
             self.start_diff(ctx);
@@ -416,13 +508,22 @@ impl HeftApp {
     // Background work
 
     fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_live(ctx);
+        self.poll_share();
+        self.poll_compress();
+        self.poll_relocate();
+        self.poll_alerts(ctx);
+        while let Ok((msg, err)) = self.notices.1.try_recv() {
+            self.toast(msg, err);
+        }
         if let Some(h) = &self.scan {
             match h.rx.try_recv() {
                 Ok(outcome) => {
                     self.scan = None;
                     match outcome {
-                        ScanOutcome::Done(t) => {
-                            self.set_tree(t);
+                        ScanOutcome::Done(t, state) => {
+                            self.live.state = state.map(|s| Arc::new(std::sync::Mutex::new(*s)));
+                            self.set_tree(t, true);
                             #[cfg(debug_assertions)]
                             self.apply_debug_env(ctx);
                         }
@@ -455,6 +556,12 @@ impl HeftApp {
                         self.dupes.checked.clear();
                         self.dupes.collapsed.clear();
                         self.dupes.searched = true;
+                        if cfg!(debug_assertions) && std::env::var_os("HEFT_DEBUG_SHARE").is_some() {
+                            for g in &self.dupes.groups {
+                                self.dupes.checked.extend(g.files.iter().skip(1));
+                            }
+                            self.plan_share();
+                        }
                     }
                 }
                 Err(_) => ctx.request_repaint_after(Duration::from_millis(100)),
@@ -512,33 +619,25 @@ impl HeftApp {
         let mut freed = 0u64;
         let mut ok = 0usize;
         let mut failures = Vec::new();
+        let mut logged = Vec::new();
+        let now = platform::now_unix();
         for (id, path, r) in results {
             match r {
                 Ok(()) => {
-                    freed += tree.node(id).size;
+                    let n = tree.node(id);
+                    freed += n.size;
+                    logged.push(crate::trashlog::Removed { when: now, size: n.size, is_dir: n.is_dir(), path, restored: false });
                     tree.remove(id);
                     ok += 1;
                 }
                 Err(e) => failures.push(format!("{path}: {e}")),
             }
         }
-        let gone = |t: &Tree, id: NodeId| t.ancestors(id).iter().any(|&a| t.is_deleted(a));
-        if self.selected.is_some_and(|s| gone(tree, s)) {
-            self.selected = None;
+        if !self.demo {
+            crate::trashlog::record(&logged);
         }
-        while gone(tree, self.view_root) {
-            self.view_root = tree.node(self.view_root).parent;
-        }
-        for g in &mut self.dupes.groups {
-            g.files.retain(|&f| !gone(tree, f));
-        }
-        self.dupes.groups.retain(|g| g.files.len() > 1);
-        self.dupes.checked.retain(|&f| !gone(tree, f));
-        self.junk.results.retain(|j| !gone(tree, j.id));
-        self.junk.checked.retain(|&f| !gone(tree, f));
-        self.rows_dirty = true;
-        self.largest.key = None;
-        self.hotspots_key = None;
+        self.removed.reload();
+        self.forget_removed();
 
         if failures.is_empty() {
             self.toast(format!("Moved {ok} item(s) to the {}, freed {}", platform::TRASH, fmt_size(freed)), false);
@@ -546,6 +645,28 @@ impl HeftApp {
             let first = failures.first().cloned().unwrap_or_default();
             self.toast(format!("{ok} moved, {} failed. {first}", failures.len()), true);
         }
+    }
+
+    /// After items were removed from the tree, drop every reference to them.
+    fn forget_removed(&mut self) {
+        let Some(tree) = self.tree.clone() else { return };
+        let gone = |id: NodeId| tree.ancestors(id).iter().any(|&a| tree.is_deleted(a));
+        if self.selected.is_some_and(gone) {
+            self.selected = None;
+        }
+        while gone(self.view_root) {
+            self.view_root = tree.node(self.view_root).parent;
+        }
+        for g in &mut self.dupes.groups {
+            g.files.retain(|&f| !gone(f));
+        }
+        self.dupes.groups.retain(|g| g.files.len() > 1);
+        self.dupes.checked.retain(|&f| !gone(f));
+        self.junk.results.retain(|j| !gone(j.id));
+        self.junk.checked.retain(|&f| !gone(f));
+        self.rows_dirty = true;
+        self.search.invalidate();
+        self.hotspots_key = None;
     }
 
     fn start_diff(&mut self, ctx: &egui::Context) {
@@ -624,13 +745,10 @@ impl HeftApp {
                         self.confirm_delete = Some(ids);
                     }
                 }
+                Action::Compress(ids) => self.open_compress(&ids),
+                Action::Relocate(id) => self.open_relocate(id),
                 Action::ScanPath(p) => self.start_scan(&p, ctx),
-                Action::Rescan => {
-                    if self.view_root != ROOT {
-                        self.restore_view = Some(tree.path(self.view_root));
-                    }
-                    self.start_scan(&tree.root_path.clone(), ctx);
-                }
+                Action::Rescan => self.rescan(ctx),
                 Action::SetHighlight(h) => {
                     self.highlight = if self.highlight == h { Highlight::None } else { h };
                 }
@@ -639,7 +757,9 @@ impl HeftApp {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.confirm_delete.is_some() {
+        // Keys belong to a text field while one is focused. Other focused
+        // widgets (rows, buttons) don't need them, so shortcuts keep working.
+        if std::mem::take(&mut self.typing) || self.confirm_delete.is_some() {
             return;
         }
         let Some(tree) = self.tree.clone() else { return };
@@ -669,6 +789,16 @@ impl HeftApp {
             }
             return;
         };
+        if self.treemap_focus {
+            // Arrows move within the treemap itself (see treemap_view).
+            if enter {
+                self.actions.push(Action::Zoom(sel));
+            }
+            if del {
+                self.actions.push(Action::Delete(vec![sel]));
+            }
+            return;
+        }
         if (up || down)
             && let Some(i) = self.rows.iter().position(|r| r.0 == sel) {
                 let j = if up { i.saturating_sub(1) } else { (i + 1).min(self.rows.len() - 1) };
@@ -700,6 +830,10 @@ impl HeftApp {
         let n = tree.node(id);
         ui.label(RichText::new(tree.name(id)).strong());
         ui.label(RichText::new(format!("{} · {} files", fmt_size(n.size), fmt_count(n.files as u64))).weak());
+        if let Some(r) = crate::risk::assess(tree, id) {
+            ui.set_max_width(340.0);
+            warnings::explain(ui, &r);
+        }
         ui.separator();
         if n.is_dir() && ui.button("Zoom into folder").clicked() {
             self.actions.push(Action::Zoom(id));
@@ -723,6 +857,14 @@ impl HeftApp {
                 self.actions.push(Action::SetHighlight(Highlight::Ext(e)));
                 ui.close();
             }
+        }
+        if n.is_dir() && self.can_compress() && ui.button("Compress…").on_hover_text("Keep the files, take less space").clicked() {
+            self.actions.push(Action::Compress(vec![id]));
+            ui.close();
+        }
+        if n.is_dir() && id != ROOT && !self.demo && ui.button("Move to another drive…").on_hover_text("Frees space here and leaves a link, so nothing loses track of it").clicked() {
+            self.actions.push(Action::Relocate(id));
+            ui.close();
         }
         ui.separator();
         let del = ui
@@ -753,7 +895,6 @@ impl HeftApp {
             ui.label(RichText::new("Heft").strong().size(17.0));
             ui.add_space(8.0);
 
-            #[cfg(windows)]
             {
                 for ws in Workspace::ALL {
                     let text = if self.workspace == ws { RichText::new(ws.label()).strong() } else { RichText::new(ws.label()) };
@@ -773,6 +914,8 @@ impl HeftApp {
                 }
                 let why = if self.workspace == Workspace::Disk {
                     "Administrator rights let Heft read the NTFS master file table directly, which is much faster"
+                } else if self.workspace.key() == "hardware" {
+                    "Administrator rights let Heft read CPU temperature and motherboard sensors through the PawnIO driver"
                 } else {
                     "Administrator rights let Heft clean system locations and change settings for all users"
                 };
@@ -840,6 +983,42 @@ impl HeftApp {
             if before != self.color_mode {
                 ui.ctx().request_repaint();
             }
+            ui.menu_button("View", |ui| {
+                ui.label(RichText::new("Size rectangles by").weak());
+                ui.radio_value(&mut self.size_by_alloc, false, "File size");
+                ui.radio_value(&mut self.size_by_alloc, true, "Space on disk")
+                    .on_hover_text("Compressed, sparse and online-only files take less room than their size");
+                ui.separator();
+                ui.checkbox(&mut self.show_labels, "Show names on large rectangles");
+                ui.separator();
+                let live = ui.add_enabled(
+                    self.live.state.is_some(),
+                    egui::Checkbox::new(&mut self.live.auto, "Update automatically"),
+                );
+                let why = if self.live.state.is_some() {
+                    "Keeps the map current using the NTFS change journal, checking every few seconds"
+                } else {
+                    "Needs a fast (MFT) scan: run Heft as administrator on an NTFS drive"
+                };
+                live.on_hover_text(why).on_disabled_hover_text(why);
+                ui.separator();
+                self.alert_menu(ui);
+            });
+            ui.menu_button("Export", |ui| {
+                ui.label(RichText::new("The folder shown in the treemap").weak());
+                if ui.button("Every file and folder (CSV)…").clicked() {
+                    self.export(Export::CsvAll);
+                    ui.close();
+                }
+                if ui.button("Folders only (CSV)…").clicked() {
+                    self.export(Export::CsvFolders);
+                    ui.close();
+                }
+                if ui.button("Summary (JSON)…").clicked() {
+                    self.export(Export::Json);
+                    ui.close();
+                }
+            });
             if self.highlight != Highlight::None {
                 let label = match (self.highlight, &self.tree) {
                     (Highlight::Ext(e), Some(t)) => format!("✖  .{}", t.exts[e as usize].name),
@@ -853,6 +1032,35 @@ impl HeftApp {
         }
     }
 
+    /// Ask where to save, then write the export on a background thread.
+    fn export(&mut self, what: Export) {
+        let Some(tree) = self.tree.clone() else { return };
+        let (name, filter) = match what {
+            Export::Json => ("heft-summary.json", "json"),
+            _ => ("heft-export.csv", "csv"),
+        };
+        let Some(path) = rfd::FileDialog::new().set_file_name(name).add_filter(filter.to_uppercase(), &[filter]).save_file()
+        else {
+            return;
+        };
+        let (root, tx) = (self.view_root, self.notices.0.clone());
+        std::thread::spawn(move || {
+            let result = std::fs::File::create(&path).and_then(|f| {
+                let mut w = std::io::BufWriter::new(f);
+                match what {
+                    Export::CsvAll => crate::export::csv(&tree, root, false, &mut w),
+                    Export::CsvFolders => crate::export::csv(&tree, root, true, &mut w),
+                    Export::Json => std::io::Write::write_all(&mut w, crate::export::json_summary(&tree, root).as_bytes()),
+                }
+                .and_then(|_| std::io::Write::flush(&mut w))
+            });
+            let _ = tx.send(match result {
+                Ok(()) => (format!("Exported to {}", path.display()), false),
+                Err(e) => (format!("Export failed: {e}"), true),
+            });
+        });
+    }
+
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if self.workspace != Workspace::Disk {
@@ -864,6 +1072,10 @@ impl HeftApp {
                     crate::tree::ScanMode::Walk => RichText::new("standard scan"),
                 };
                 ui.label(mode);
+                if self.live.auto && self.live.state.is_some() {
+                    ui.label(RichText::new("· updating live").color(Color32::from_rgb(110, 200, 120)))
+                        .on_hover_text("Changes on the drive show up within a few seconds");
+                }
                 let phases: Vec<String> =
                     tree.info.phases.iter().map(|(n, ms)| format!("{}: {}", n.trim(), fmt_duration_ms(*ms))).collect();
                 let scanned_in = if self.demo {
@@ -911,13 +1123,18 @@ impl HeftApp {
         let Some(tree) = self.tree.clone() else { return };
         let total: u64 = ids.iter().map(|&i| tree.node(i).size).sum();
         let files: u64 = ids.iter().map(|&i| tree.node(i).files as u64).sum();
-        let protected: Vec<String> =
-            ids.iter().map(|&i| tree.path(i)).filter(|p| platform::is_protected_path(p)).collect();
+        // Every risky item, worst first, so the dangerous ones can't hide in a long list.
+        let mut risky: Vec<(NodeId, crate::risk::Risk)> =
+            ids.iter().filter_map(|&i| crate::risk::assess(&tree, i).map(|r| (i, r))).collect();
+        risky.sort_by(|a, b| b.1.level.cmp(&a.1.level));
+        let worst = risky.first().map(|r| r.1.level);
+        let needs_ack = worst == Some(crate::risk::Level::Danger);
         let network = platform::is_network_path(&tree.root_path);
         let mut close = false;
         let mut go = false;
+        let mut ack = self.delete_ack;
         let resp = egui::Modal::new(egui::Id::new("confirm_delete")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(560.0);
             ui.heading(format!("Move to {}?", platform::TRASH));
             ui.add_space(4.0);
             ui.label(format!(
@@ -927,7 +1144,7 @@ impl HeftApp {
                 fmt_count(files)
             ));
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("delete_paths").max_height(150.0).show(ui, |ui| {
                 for &i in ids.iter().take(200) {
                     ui.add(egui::Label::new(RichText::new(tree.path(i)).monospace().size(11.5)).truncate());
                 }
@@ -935,12 +1152,30 @@ impl HeftApp {
                     ui.label(format!("…and {} more", ids.len() - 200));
                 }
             });
-            if !protected.is_empty() {
-                ui.add_space(6.0);
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    "⚠ This includes system locations. Deleting them can break Windows or installed programs.",
-                );
+            if !risky.is_empty() {
+                ui.add_space(8.0);
+                let color = warnings::color(worst.unwrap_or(crate::risk::Level::Caution));
+                let intro = if needs_ack {
+                    "Some of this could stop your computer or your apps from working:"
+                } else {
+                    "Some of this might break an app or lose data:"
+                };
+                ui.label(RichText::new(intro).color(color).strong());
+                egui::ScrollArea::vertical().id_salt("delete_risks").max_height(180.0).show(ui, |ui| {
+                    for (i, r) in risky.iter().take(50) {
+                        ui.add_space(3.0);
+                        ui.label(warnings::heading(r));
+                        ui.add(egui::Label::new(RichText::new(tree.path(*i)).monospace().size(11.0).weak()).truncate());
+                        ui.label(RichText::new(r.detail).weak());
+                    }
+                    if risky.len() > 50 {
+                        ui.label(format!("…and {} more with warnings", risky.len() - 50));
+                    }
+                });
+                if needs_ack {
+                    ui.add_space(6.0);
+                    ui.checkbox(&mut ack, "I understand this could break my system, and I want to delete it anyway");
+                }
             }
             if network {
                 ui.add_space(6.0);
@@ -948,8 +1183,9 @@ impl HeftApp {
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                let label = if protected.is_empty() { format!("Move to {}", platform::TRASH) } else { "Move anyway".into() };
-                if ui.add_enabled(!network, egui::Button::new(RichText::new(label).strong())).clicked() {
+                let label = if risky.is_empty() { format!("Move to {}", platform::TRASH) } else { "Move anyway".into() };
+                let allowed = !network && (!needs_ack || ack);
+                if ui.add_enabled(allowed, egui::Button::new(RichText::new(label).strong())).clicked() {
                     go = true;
                 }
                 if ui.button("Cancel").clicked() {
@@ -960,11 +1196,14 @@ impl HeftApp {
         if resp.should_close() {
             close = true;
         }
+        self.delete_ack = ack;
         if go {
             self.confirm_delete = None;
+            self.delete_ack = false;
             self.start_delete(ids, ctx);
         } else if close {
             self.confirm_delete = None;
+            self.delete_ack = false;
         }
     }
 }
@@ -983,9 +1222,23 @@ impl eframe::App for HeftApp {
             self.toolbar(ui);
             ui.add_space(2.0);
         });
+        self.alert_banner(ui);
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
 
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
+        if self.workspace == Workspace::Hardware {
+            self.hardware.show(ui, self.elevated);
+            for e in self.hardware.take_events() {
+                match e {
+                    hardware::Event::Toast(msg, err) => self.toast(msg, err),
+                    hardware::Event::Elevate => self.restart_elevated(&ctx),
+                }
+            }
+            return;
+        }
+        #[cfg(any(windows, target_os = "linux"))]
+        self.hardware.hidden();
+
         if self.workspace != Workspace::Disk {
             self.tools.show(ui, self.workspace);
             for e in self.tools.take_events() {
@@ -1009,6 +1262,9 @@ impl eframe::App for HeftApp {
         }
 
         self.confirm_delete_modal(&ctx);
+        self.share_modal(&ctx);
+        self.compress_modal(&ctx);
+        self.relocate_modal(&ctx);
         if self.delete_job.is_some() {
             egui::Modal::new(egui::Id::new("deleting")).show(&ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -1028,5 +1284,11 @@ impl eframe::App for HeftApp {
         };
         storage.set_string("color_mode", mode.into());
         storage.set_string("use_mft", if self.use_mft { "1" } else { "0" }.into());
+        storage.set_string("size_by", if self.size_by_alloc { "disk" } else { "file" }.into());
+        storage.set_string("labels", if self.show_labels { "1" } else { "0" }.into());
+        storage.set_string("auto_update", if self.live.auto { "1" } else { "0" }.into());
+        self.alerts.save(storage);
+        #[cfg(any(windows, target_os = "linux"))]
+        self.hardware.save(storage);
     }
 }

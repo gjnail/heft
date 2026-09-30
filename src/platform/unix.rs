@@ -264,19 +264,3 @@ pub fn local_time(unix: i64) -> Option<LocalTime> {
 pub fn is_network_path(_path: &str) -> bool {
     false
 }
-
-/// Paths where deleting things is very likely to break the system.
-pub fn is_protected_path(path: &str) -> bool {
-    let p = path.trim_end_matches('/');
-    if p.is_empty() || p.matches('/').count() <= 1 {
-        return true; // `/` and every top-level folder
-    }
-    if super::home_dir().is_some_and(|h| h.trim_end_matches('/') == p) {
-        return true;
-    }
-    const SYSTEM: [&str; 16] = [
-        "/System", "/usr", "/bin", "/sbin", "/etc", "/lib", "/lib32", "/lib64", "/libx32", "/boot", "/proc", "/sys",
-        "/dev", "/private/var/db", "/Library/Apple", "/var/lib",
-    ];
-    SYSTEM.iter().any(|s| p == *s || p.starts_with(&format!("{s}/")))
-}

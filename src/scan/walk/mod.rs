@@ -3,12 +3,14 @@
 //! tree arena needs no locking.
 //!
 //! Listing is platform-specific (`windows.rs` batches entries with
-//! `GetFileInformationByHandleEx`; `portable.rs` uses `std::fs` and is what
-//! macOS and Linux run). The walk itself (hard-link and loop detection,
-//! skipping virtual file systems) is shared.
+//! `GetFileInformationByHandleEx`, `macos.rs` with `getattrlistbulk`;
+//! `portable.rs` uses `std::fs` and is what Linux runs). The walk itself
+//! (hard-link and loop detection, skipping virtual file systems) is shared.
 
 #[cfg_attr(windows, allow(dead_code))]
 mod portable;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
@@ -83,7 +85,9 @@ type IdSet = HashSet<u128, BuildHasherDefault<IdHasher>>;
 pub fn scan(root: &str, progress: &Progress) -> Result<Tree, String> {
     #[cfg(windows)]
     let lister = windows::WinLister::default();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let lister = macos::BulkLister;
+    #[cfg(not(any(windows, target_os = "macos")))]
     let lister = portable::StdLister;
     scan_with(root, progress, &lister, &skip_mounts())
 }
@@ -265,6 +269,18 @@ mod tests {
         let root = crate::scan::normalize_root(&dir.to_string_lossy());
         let t = scan_with(&root, &Progress::default(), &windows::WinLister::default(), &HashSet::new()).unwrap();
         check(&t, true);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_lister_walks_a_tree() {
+        let dir = fixture();
+        let root = crate::scan::normalize_root(&dir.to_string_lossy());
+        let t = scan_with(&root, &Progress::default(), &macos::BulkLister, &HashSet::new()).unwrap();
+        check(&t, true);
+        let hidden = child(&t, ROOT, ".hidden");
+        assert!(t.node(hidden).flags & flags::HIDDEN != 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

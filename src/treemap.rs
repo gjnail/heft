@@ -47,6 +47,15 @@ pub struct Style {
     pub now: i64,
     pub diff: Option<Arc<Diff>>,
     pub highlight: Highlight,
+    /// Size rectangles by space used on disk instead of file size.
+    pub by_alloc: bool,
+}
+
+impl Style {
+    /// The number each rectangle's area is proportional to.
+    pub fn weight(&self, n: &crate::tree::Node) -> u64 {
+        if self.by_alloc { n.alloc } else { n.size }
+    }
 }
 
 impl Style {
@@ -180,7 +189,7 @@ pub fn render(req: &Request) -> Rendered {
         rects: Vec::with_capacity(4096),
     };
     let rect = [0.0, 0.0, w as f64, h as f64];
-    if req.tree.node(req.root).size > 0 || !req.tree.node(req.root).is_dir() {
+    if req.style.weight(req.tree.node(req.root)) > 0 || !req.tree.node(req.root).is_dir() {
         ctx.draw(req.root, rect, [0.0; 4], HEIGHT, 0);
     } else {
         ctx.rects.push(TmRect { x0: 0.0, y0: 0.0, x1: w as f32, y1: h as f32, node: req.root, depth: 0 });
@@ -223,12 +232,23 @@ impl Ctx<'_> {
         }
         let n = self.tree.node(id);
         let kids = self.tree.children(id);
-        if !n.is_dir() || kids.is_empty() || n.size == 0 || rw < 2.0 || rh < 2.0 {
+        let total = self.style.weight(n);
+        if !n.is_dir() || kids.is_empty() || total == 0 || rw < 2.0 || rh < 2.0 {
             let c = self.style.leaf_color(self.tree, id);
             self.paint(r, &s, c);
             return;
         }
-        for (child, cr) in squarify(self.tree, kids, n.size, r) {
+        // Children are stored biggest-first by file size; on-disk order can differ.
+        let sorted;
+        let kids = if self.style.by_alloc {
+            let mut k = kids.to_vec();
+            k.sort_unstable_by_key(|&c| std::cmp::Reverse(self.tree.node(c).alloc));
+            sorted = k;
+            &sorted[..]
+        } else {
+            kids
+        };
+        for (child, cr) in squarify_by(self.tree, kids, total, r, |n| self.style.weight(n)) {
             self.draw(child, cr, s, height * SCALE, depth + 1);
         }
     }
@@ -269,9 +289,22 @@ fn add_ridge(s: &mut [f64; 4], r: [f64; 4], h: f64) {
 
 /// Lay out `kids` (sorted biggest first) inside `r`, rows along the shorter
 /// side, greedily keeping aspect ratios close to 1.
+#[cfg(test)]
 pub fn squarify(tree: &Tree, kids: &[NodeId], total: u64, r: [f64; 4]) -> Vec<(NodeId, [f64; 4])> {
+    squarify_by(tree, kids, total, r, |n| n.size)
+}
+
+/// Like [`squarify`], with each child weighted by `weight` (kids must be
+/// sorted biggest-first by that weight).
+pub fn squarify_by(
+    tree: &Tree,
+    kids: &[NodeId],
+    total: u64,
+    r: [f64; 4],
+    weight: impl Fn(&crate::tree::Node) -> u64,
+) -> Vec<(NodeId, [f64; 4])> {
     let mut out = Vec::with_capacity(kids.len());
-    let sizes: Vec<f64> = kids.iter().map(|&k| tree.node(k).size as f64).take_while(|&s| s > 0.0).collect();
+    let sizes: Vec<f64> = kids.iter().map(|&k| weight(tree.node(k)) as f64).take_while(|&s| s > 0.0).collect();
     if sizes.is_empty() || total == 0 {
         return out;
     }

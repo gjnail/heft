@@ -7,30 +7,17 @@ use std::sync::Arc;
 use eframe::egui::{self, pos2, vec2, Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense};
 
 use super::tree_view::ROW_H;
-use super::{Action, HeftApp};
+use super::{warnings, Action, HeftApp};
 use crate::colors::{to_color32, Category, CATEGORIES};
 use crate::history;
 use crate::platform;
-use crate::tree::{flags, NodeId, Tree, ROOT};
+use crate::tree::{NodeId, Tree, ROOT};
 use crate::treemap::{ColorMode, Highlight};
 use crate::util::{fmt_ago, fmt_count, fmt_delta, fmt_duration_ms, fmt_size, pct};
 
-const AGE_CHOICES: [(u32, &str); 5] = [(0, "any age"), (30, "1 month"), (182, "6 months"), (365, "1 year"), (730, "2 years")];
 const DUP_SIZES: [(u64, &str); 4] = [(100 << 10, "100 KB"), (1 << 20, "1 MB"), (10 << 20, "10 MB"), (100 << 20, "100 MB")];
 
-/// Case-insensitive substring match; `needle` must already be lowercase.
-fn contains_ci(hay: &str, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    if hay.is_ascii() && needle.is_ascii() {
-        let (h, n) = (hay.as_bytes(), needle.as_bytes());
-        return h.len() >= n.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n));
-    }
-    hay.to_lowercase().contains(needle)
-}
-
-fn share_bar(ui: &egui::Ui, rect: Rect, frac: f32, color: Color32) {
+pub(super) fn share_bar(ui: &egui::Ui, rect: Rect, frac: f32, color: Color32) {
     let p = ui.painter();
     p.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
     let mut f = rect;
@@ -126,91 +113,6 @@ impl HeftApp {
     }
 
     // ------------------------------------------------------------------
-    // Largest files
-
-    pub(super) fn largest_tab(&mut self, ui: &mut egui::Ui) {
-        let Some(tree) = self.tree.clone() else { return };
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.largest.filter).hint_text("Filter: name or .ext").desired_width(190.0));
-            ui.label("older than");
-            let current = AGE_CHOICES.iter().find(|c| c.0 == self.largest.min_age_days).map(|c| c.1).unwrap_or("any age");
-            egui::ComboBox::from_id_salt("age_filter").selected_text(current).show_ui(ui, |ui| {
-                for (d, l) in AGE_CHOICES {
-                    ui.selectable_value(&mut self.largest.min_age_days, d, l);
-                }
-            });
-        });
-        ui.label(RichText::new(format!("Top 500 in {}", tree.path(self.view_root))).weak().size(11.5));
-        ui.add_space(4.0);
-
-        let filter = self.largest.filter.trim().to_lowercase();
-        let key = (Arc::as_ptr(&tree) as usize, tree.version, self.view_root, filter.clone(), self.largest.min_age_days);
-        if self.largest.key.as_ref() != Some(&key) {
-            let cutoff = if self.largest.min_age_days == 0 { i64::MAX } else { platform::now_unix() - self.largest.min_age_days as i64 * 86_400 };
-            let ext_filter = filter.strip_prefix("*.").or_else(|| filter.strip_prefix('.')).map(str::to_string);
-            let ext_id = ext_filter.as_ref().and_then(|x| tree.exts.iter().position(|e| &e.name == x));
-            self.largest.results = tree.largest_files(self.view_root, 500, |id, n| {
-                if n.mtime > cutoff {
-                    return false;
-                }
-                match (&ext_filter, ext_id) {
-                    (Some(_), Some(e)) => n.ext as usize == e,
-                    (Some(_), None) => false,
-                    _ => contains_ci(tree.name(id), &filter),
-                }
-            });
-            self.largest.key = Some(key);
-        }
-
-        if self.largest.results.is_empty() {
-            ui.label(RichText::new("No matching files.").weak());
-            return;
-        }
-        let results = self.largest.results.clone();
-        let view_size = tree.node(self.view_root).size.max(1);
-        ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            egui::ScrollArea::vertical().auto_shrink([false, false]).id_salt("largest_rows").show_rows(ui, ROW_H * 1.6, results.len(), |ui, range| {
-                for &id in &results[range] {
-                    let n = *tree.node(id);
-                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H * 1.6), Sense::click());
-                    let selected = self.selected == Some(id);
-                    if selected {
-                        ui.painter().rect_filled(rect, 3.0, ui.visuals().selection.bg_fill);
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(rect, 3.0, ui.visuals().widgets.hovered.weak_bg_fill);
-                    }
-                    let v = ui.visuals();
-                    let p = ui.painter();
-                    let top = rect.top() + 10.0;
-                    let bottom = rect.bottom() - 9.0;
-                    p.text(pos2(rect.left() + 6.0, top), Align2::LEFT_CENTER, fmt_size(n.size), FontId::proportional(13.0), v.strong_text_color());
-                    share_bar(ui, Rect::from_min_size(pos2(rect.left() + 6.0, bottom - 3.0), vec2(62.0, 6.0)), n.size as f32 / view_size as f32, to_color32(self.ext_colors[n.ext as usize]));
-                    let text_x = rect.left() + 80.0;
-                    let clip = Rect::from_min_max(pos2(text_x, rect.top()), pos2(rect.right() - 90.0, rect.bottom()));
-                    let pc = p.with_clip_rect(clip.intersect(p.clip_rect()));
-                    pc.text(pos2(text_x, top), Align2::LEFT_CENTER, tree.name(id), FontId::proportional(13.0), v.text_color());
-                    pc.text(pos2(text_x, bottom), Align2::LEFT_CENTER, tree.path(n.parent), FontId::proportional(11.0), v.weak_text_color());
-                    p.text(pos2(rect.right() - 6.0, top), Align2::RIGHT_CENTER, platform::fmt_date(n.mtime), FontId::proportional(11.5), v.weak_text_color());
-                    if n.flags & flags::CLOUD != 0 {
-                        p.text(pos2(rect.right() - 6.0, bottom), Align2::RIGHT_CENTER, "☁ online-only", FontId::proportional(11.0), v.weak_text_color());
-                    }
-                    if resp.hovered() {
-                        self.list_hover = Some(id);
-                    }
-                    if resp.clicked() {
-                        self.actions.push(Action::Reveal(id));
-                    }
-                    if resp.double_clicked() {
-                        self.actions.push(Action::ShowInFileManager(id));
-                    }
-                    resp.context_menu(|ui| self.node_menu(ui, &tree, id));
-                }
-            });
-        });
-    }
-
-    // ------------------------------------------------------------------
     // Duplicates
 
     pub(super) fn dupes_tab(&mut self, ui: &mut egui::Ui) {
@@ -287,6 +189,21 @@ impl HeftApp {
                 ids.sort_unstable();
                 self.actions.push(Action::Delete(ids));
             }
+            let method = self.share_method();
+            let label = match method {
+                Some(crate::dedupe::Method::Clone) => "Replace with clones…",
+                _ => "Replace with links…",
+            };
+            let why = if method.is_some() {
+                "Frees the same space but leaves a file in every place. Each selected copy becomes a link to, \
+                 or a clone of, the copy you keep."
+            } else {
+                "This drive can't share storage between files."
+            };
+            let share = ui.add_enabled(n > 0 && method.is_some() && !self.demo, egui::Button::new(label));
+            if share.on_hover_text(why).on_disabled_hover_text(why).clicked() {
+                self.plan_share();
+            }
         });
         let unsafe_groups = self
             .dupes
@@ -346,7 +263,7 @@ impl HeftApp {
                             ui.allocate_ui_with_layout(vec2(ui.available_width(), ROW_H), Layout::left_to_right(Align::Center), |ui| {
                                 ui.add_space(14.0);
                                 let mut on = self.dupes.checked.contains(&id);
-                                if ui.checkbox(&mut on, "").changed() {
+                                if warnings::checkbox(ui, &mut on, &tree.path(id)).changed() {
                                     if on {
                                         self.dupes.checked.insert(id);
                                     } else {
@@ -433,7 +350,7 @@ impl HeftApp {
                     let n = *tree.node(j.id);
                     ui.allocate_ui_with_layout(vec2(ui.available_width(), ROW_H * 1.6), Layout::left_to_right(Align::Center), |ui| {
                         let mut on = self.junk.checked.contains(&j.id);
-                        if ui.checkbox(&mut on, "").changed() {
+                        if warnings::checkbox(ui, &mut on, &tree.path(j.id)).changed() {
                             if on {
                                 self.junk.checked.insert(j.id);
                             } else {
@@ -489,6 +406,8 @@ impl HeftApp {
             ui.label(RichText::new(format!("Snapshots are stored in {}", history::history_dir().display())).weak().size(11.0));
             return;
         }
+
+        self.trend_chart(ui);
 
         let now = platform::now_unix();
         let describe = |m: &history::SnapMeta| {

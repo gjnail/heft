@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for heft.exe. SignPath keeps its own copy:
+  paste this into the Heft project's default artifact configuration there,
+  and update both together. The release workflow uploads heft.exe on its own
+  (not zipped) and passes the version from Cargo.toml, so SignPath refuses to
+  sign any file whose product name or version doesn't match.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <pe-file product-name="Heft" product-version="${version}">
+    <authenticode-sign />
+  </pe-file>
+</artifact-configuration>

@@ -9,6 +9,11 @@
 //! owns a disjoint range of record slots, so base records are written in
 //! place without locking. The rare extension records (attributes that
 //! overflowed into another record) are collected per chunk and merged after.
+//!
+//! After a full scan the parsed records are kept, along with the position in
+//! the NTFS change journal. A rescan then reads only the journal entries
+//! written since, re-reads just the records they name (through NTFS, so no
+//! volume flush), and rebuilds the tree: seconds become a fraction of one.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -18,8 +23,8 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 
+use super::mft_parse::*;
 use super::{base_info, Progress};
-use crate::platform::filetime_to_unix;
 use crate::tree::{flags, ScanMode, Tree, TreeBuilder, ROOT};
 
 const SHARE_ALL: u32 = 1 | 2 | 4; // FILE_SHARE_READ | WRITE | DELETE
@@ -30,75 +35,18 @@ const ALIGN: usize = 4096;
 const ROOT_RECORD: usize = 5;
 const CHUNK: u64 = 4 << 20;
 
-const AT_STANDARD_INFORMATION: u32 = 0x10;
-const AT_ATTRIBUTE_LIST: u32 = 0x20;
-const AT_FILE_NAME: u32 = 0x30;
-const AT_DATA: u32 = 0x80;
-const AT_INDEX_ALLOCATION: u32 = 0xA0;
-const AT_END: u32 = 0xFFFF_FFFF;
-
-const NS_DOS: u8 = 2;
-
-// Rec::fl
-const R_INUSE: u8 = 1;
-const R_DIR: u8 = 2;
-const R_NAMED: u8 = 4;
-const R_HAS_SIZE: u8 = 8;
-const R_HAS_SI: u8 = 16;
-// Rec::attrs (packed subset of FILE_ATTRIBUTE_*)
-const A_HIDDEN: u8 = 1;
-const A_SYSTEM: u8 = 2;
-const A_CLOUD: u8 = 4;
-
-/// Per-record scratch data, indexed by MFT record number.
-#[derive(Clone, Copy, Default)]
-struct Rec {
-    parent: u32,
-    parent_seq: u16,
-    seq: u16,
-    name: NameRef,
-    ns: u8,
-    fl: u8,
-    attrs: u8,
-    mtime: u32,
-    size: u64,
-    alloc: u64,
-}
-
-/// A name stored in one of the per-chunk string arenas.
-#[derive(Clone, Copy, Default)]
-struct NameRef {
-    chunk: u32,
-    off: u32,
-    len: u16,
-}
-
-/// An additional hard link to a file (a second long `$FILE_NAME`).
-#[derive(Clone, Copy)]
-struct Link {
-    target: u32,
-    parent: u32,
-    parent_seq: u16,
-    name: NameRef,
-}
-
-#[derive(Default)]
-struct ChunkOut {
-    names: String,
-    /// Attributes found in extension records, keyed by their base record.
-    partials: Vec<(usize, Rec)>,
-    links: Vec<Link>,
-}
-
 #[derive(Clone, Copy)]
 struct Geometry {
     cluster: u64,
     rec_size: u64,
 }
 
-type Runs = Vec<(i64, u64)>; // (lcn or -1 for sparse, length in clusters)
-
 pub fn scan(root: &str, progress: &Progress) -> Result<Tree, String> {
+    scan_with_state(root, progress).map(|(t, _)| t)
+}
+
+/// A full MFT scan that also returns what [`refresh`] needs later.
+pub fn scan_with_state(root: &str, progress: &Progress) -> Result<(Tree, MftState), String> {
     let drive = root.chars().next().filter(|c| c.is_ascii_alphabetic()).ok_or("not a drive path")?;
     let mut phases: Vec<(&'static str, u64)> = Vec::new();
     let mut clock = Instant::now();
@@ -117,6 +65,9 @@ pub fn scan(root: &str, progress: &Progress) -> Result<Tree, String> {
             .map_err(|e| format!("cannot open volume: {e}"))
     };
     let mut vol = open(true)?;
+    // Note the journal position before reading, so anything that changes
+    // while we read is replayed by the next refresh.
+    let journal = query_journal(&vol).ok().map(|j| (j.id, j.next));
     lap("open volume", &mut phases);
 
     let boot = match read_at(&vol, 0, 4096) {
@@ -206,15 +157,14 @@ pub fn scan(root: &str, progress: &Progress) -> Result<Tree, String> {
     progress.set_fraction(None);
     let names = Names { arenas: &arenas };
     let b = link_records(root, &recs, &names, &links)?;
-    drop(recs);
-    drop(arenas);
     lap("link records", &mut phases);
     let mut info = base_info(ScanMode::Mft);
     let mut tree = b.finish(root.to_string(), info.clone());
     lap("aggregate", &mut phases);
     info.phases = phases;
     tree.info = info;
-    Ok(tree)
+    let state = MftState { drive, root: root.to_string(), rec_size: rec_size as usize, recs, arenas, links, journal };
+    Ok((tree, state))
 }
 
 /// Heap buffer whose start is aligned for unbuffered I/O.
@@ -362,163 +312,6 @@ fn mft_layout(vol: &File, rec0: &[u8], geo: Geometry) -> Result<(u64, Runs), Str
     Ok((size, runs))
 }
 
-/// Parse one raw record. Base records are written into `slot`; attributes of
-/// extension records are queued for their base record. Returns true for an
-/// in-use base record.
-fn parse_record(buf: &mut [u8], recno: usize, slot: &mut Rec, chunk: u32, out: &mut ChunkOut) -> bool {
-    if &buf[0..4] != b"FILE" || !fixup(buf) {
-        return false;
-    }
-    let hflags = le16(buf, 0x16).unwrap_or(0);
-    if hflags & 1 == 0 {
-        return false; // not in use
-    }
-    let base = (le64(buf, 0x20).unwrap_or(0) & 0xFFFF_FFFF_FFFF) as usize;
-    if base == 0 {
-        slot.fl |= R_INUSE;
-        if hflags & 2 != 0 {
-            slot.fl |= R_DIR;
-        }
-        slot.seq = le16(buf, 0x10).unwrap_or(0);
-        absorb(buf, recno, slot, chunk, out);
-        true
-    } else {
-        let mut p = Rec::default();
-        absorb(buf, base, &mut p, chunk, out);
-        out.partials.push((base, p));
-        false
-    }
-}
-
-/// Accumulate the attributes of one record into `r` (which describes file `target`).
-fn absorb(buf: &[u8], target: usize, r: &mut Rec, chunk: u32, out: &mut ChunkOut) {
-    for a in attributes(buf) {
-        let ty = le32(a, 0).unwrap_or(0);
-        let nonres = a[8] != 0;
-        let name_len = a[9];
-        match ty {
-            AT_STANDARD_INFORMATION if !nonres => {
-                if let Some(v) = resident_value(a).filter(|v| v.len() >= 36) {
-                    r.mtime = filetime_to_unix(le64(v, 8).unwrap_or(0)).clamp(0, u32::MAX as i64) as u32;
-                    let fa = le32(v, 32).unwrap_or(0);
-                    r.attrs = 0;
-                    if fa & 0x2 != 0 {
-                        r.attrs |= A_HIDDEN;
-                    }
-                    if fa & 0x4 != 0 {
-                        r.attrs |= A_SYSTEM;
-                    }
-                    if fa & (0x1000 | 0x40000 | 0x400000) != 0 {
-                        r.attrs |= A_CLOUD;
-                    }
-                    r.fl |= R_HAS_SI;
-                }
-            }
-            AT_FILE_NAME if !nonres => {
-                let Some(v) = resident_value(a).filter(|v| v.len() >= 66) else { continue };
-                let pref = le64(v, 0).unwrap_or(0);
-                let nlen = v[64] as usize;
-                let ns = v[65];
-                let parent = pref & 0xFFFF_FFFF_FFFF;
-                if parent > u32::MAX as u64 || v.len() < 66 + nlen * 2 {
-                    continue;
-                }
-                let has_long = r.fl & R_NAMED != 0 && r.ns != NS_DOS;
-                if ns == NS_DOS && r.fl & R_NAMED != 0 {
-                    continue; // 8.3 alias of a name we already have
-                }
-                let off = out.names.len();
-                let units = v[66..66 + nlen * 2].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]]));
-                out.names.extend(char::decode_utf16(units).map(|c| c.unwrap_or('\u{FFFD}')));
-                let name = NameRef { chunk, off: off as u32, len: (out.names.len() - off).min(u16::MAX as usize) as u16 };
-                let parent_seq = (pref >> 48) as u16;
-                if has_long {
-                    // A second long name = another hard link to this file.
-                    out.links.push(Link { target: target as u32, parent: parent as u32, parent_seq, name });
-                } else {
-                    r.name = name;
-                    r.parent = parent as u32;
-                    r.parent_seq = parent_seq;
-                    r.ns = ns;
-                    r.fl |= R_NAMED;
-                }
-            }
-            AT_DATA => {
-                let first_extent = !nonres || le64(a, 16) == Some(0);
-                if !first_extent {
-                    continue;
-                }
-                if name_len == 0 {
-                    if nonres {
-                        r.size = le64(a, 48).unwrap_or(0);
-                        r.alloc += nonres_alloc(a);
-                    } else {
-                        r.size = le32(a, 16).unwrap_or(0) as u64;
-                    }
-                    r.fl |= R_HAS_SIZE;
-                } else if nonres && target >= 16 {
-                    // Alternate streams (incl. WofCompressedData) take real space.
-                    r.alloc += nonres_alloc(a);
-                }
-            }
-            AT_INDEX_ALLOCATION if nonres && le64(a, 16) == Some(0) => {
-                r.alloc += nonres_alloc(a);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Fold an extension record's attributes into its base record. Returns a
-/// hard link if the extension carried a second long name.
-fn merge(dst: &mut Rec, src: &Rec, target: usize) -> Option<Link> {
-    let mut extra = None;
-    if src.fl & R_NAMED != 0 {
-        let dst_long = dst.fl & R_NAMED != 0 && dst.ns != NS_DOS;
-        if !dst_long {
-            dst.name = src.name;
-            dst.parent = src.parent;
-            dst.parent_seq = src.parent_seq;
-            dst.ns = src.ns;
-            dst.fl |= R_NAMED;
-        } else if src.ns != NS_DOS {
-            extra = Some(Link { target: target as u32, parent: src.parent, parent_seq: src.parent_seq, name: src.name });
-        }
-    }
-    if src.fl & R_HAS_SIZE != 0 {
-        dst.size = src.size;
-    }
-    if src.fl & R_HAS_SI != 0 {
-        dst.mtime = src.mtime;
-        dst.attrs = src.attrs;
-    }
-    dst.alloc += src.alloc;
-    extra
-}
-
-fn nonres_alloc(a: &[u8]) -> u64 {
-    let aflags = le16(a, 12).unwrap_or(0);
-    if aflags & 0x8001 != 0 {
-        // compressed or sparse: the real allocation lives in compressed_size
-        le64(a, 64).unwrap_or(0)
-    } else {
-        le64(a, 40).unwrap_or(0)
-    }
-}
-
-struct Names<'a> {
-    arenas: &'a [String],
-}
-
-impl Names<'_> {
-    fn get(&self, n: NameRef) -> &str {
-        self.arenas
-            .get(n.chunk as usize)
-            .and_then(|a| a.get(n.off as usize..n.off as usize + n.len as usize))
-            .unwrap_or("")
-    }
-}
-
 /// Children entries are record numbers, or link indices tagged with this bit.
 const LINK_BIT: u32 = 1 << 31;
 
@@ -631,244 +424,192 @@ fn link_records(root: &str, recs: &[Rec], names: &Names, links: &[Link]) -> Resu
 }
 
 // ---------------------------------------------------------------------------
-// Low-level record helpers
+// Incremental rescans through the NTFS change journal
 
-/// Undo NTFS "update sequence" protection: the last two bytes of every 512-byte
-/// sector were replaced on disk with a check value; restore the originals.
-fn fixup(rec: &mut [u8]) -> bool {
-    let (Some(off), Some(cnt)) = (le16(rec, 4), le16(rec, 6)) else { return false };
-    let (off, cnt) = (off as usize, cnt as usize);
-    if cnt == 0 || off + cnt * 2 > rec.len() {
-        return false;
+/// Everything a full scan parsed, kept so a rescan can apply only what the
+/// change journal says has changed.
+pub struct MftState {
+    drive: char,
+    root: String,
+    rec_size: usize,
+    recs: Vec<Rec>,
+    arenas: Vec<String>,
+    links: Vec<Link>,
+    /// (journal id, next USN) as of the last scan or refresh.
+    journal: Option<(u64, i64)>,
+}
+
+/// More changes than this and a full scan is quicker than chasing them.
+const MAX_CHANGES: usize = 250_000;
+
+/// Bring `st` up to date from the change journal. `Ok(None)` means nothing
+/// changed; `Err` means the journal can't be used (it was reset, or too much
+/// changed) and a full scan is needed.
+pub fn refresh(st: &mut MftState, progress: &Progress) -> Result<Option<Tree>, String> {
+    let t0 = Instant::now();
+    let (id, since) = st.journal.ok_or("this volume has no change journal")?;
+    progress.set_phase("Reading the change journal");
+    let vol = OpenOptions::new()
+        .read(true)
+        .share_mode(SHARE_ALL)
+        .open(format!(r"\\.\{}:", st.drive))
+        .map_err(|e| format!("cannot open volume: {e}"))?;
+    let now = query_journal(&vol)?;
+    if now.id != id || since < now.first {
+        return Err("the change journal was reset since the last scan".into());
     }
-    let usn = [rec[off], rec[off + 1]];
-    for i in 1..cnt {
-        let end = i * 512;
-        if end > rec.len() {
-            break;
-        }
-        if rec[end - 2..end] != usn {
-            return false; // torn write
-        }
-        rec[end - 2] = rec[off + 2 * i];
-        rec[end - 1] = rec[off + 2 * i + 1];
+    let (changed, next) = read_journal(&vol, id, since, now.next)?;
+    let journal_ms = t0.elapsed().as_millis() as u64;
+    if changed.is_empty() {
+        st.journal = Some((id, next));
+        return Ok(None);
     }
-    true
-}
-
-struct Attributes<'a> {
-    rec: &'a [u8],
-    off: usize,
-    end: usize,
-}
-
-fn attributes(rec: &[u8]) -> Attributes<'_> {
-    let off = le16(rec, 0x14).unwrap_or(u16::MAX) as usize;
-    let end = (le32(rec, 0x18).unwrap_or(0) as usize).min(rec.len());
-    Attributes { rec, off, end }
-}
-
-impl<'a> Iterator for Attributes<'a> {
-    type Item = &'a [u8];
-    fn next(&mut self) -> Option<&'a [u8]> {
-        if self.off + 24 > self.end {
-            return None;
-        }
-        let ty = le32(self.rec, self.off)?;
-        if ty == AT_END {
-            return None;
-        }
-        let len = le32(self.rec, self.off + 4)? as usize;
-        if len < 24 || self.off + len > self.end {
-            return None;
-        }
-        let a = &self.rec[self.off..self.off + len];
-        self.off += len;
-        Some(a)
-    }
-}
-
-fn resident_value(a: &[u8]) -> Option<&[u8]> {
-    let len = le32(a, 16)? as usize;
-    let off = le16(a, 20)? as usize;
-    a.get(off..off + len)
-}
-
-fn runs_of(a: &[u8]) -> Runs {
-    let off = le16(a, 32).unwrap_or(0) as usize;
-    a.get(off..).map(decode_runs).unwrap_or_default()
-}
-
-fn decode_runs(b: &[u8]) -> Runs {
-    let mut out = Runs::new();
-    let mut pos = 0;
-    let mut lcn: i64 = 0;
-    while pos < b.len() {
-        let h = b[pos];
-        if h == 0 {
-            break;
-        }
-        pos += 1;
-        let (ls, os) = ((h & 0x0F) as usize, (h >> 4) as usize);
-        if ls == 0 || ls > 8 || os > 8 || pos + ls + os > b.len() {
-            break;
-        }
-        let mut len = 0u64;
-        for i in 0..ls {
-            len |= (b[pos + i] as u64) << (8 * i);
-        }
-        pos += ls;
-        if os == 0 {
-            out.push((-1, len));
-        } else {
-            let mut delta: i64 = 0;
-            for i in 0..os {
-                delta |= (b[pos + i] as i64) << (8 * i);
-            }
-            let shift = 64 - 8 * os as u32;
-            if shift < 64 {
-                delta = (delta << shift) >> shift; // sign-extend
-            }
-            lcn += delta;
-            out.push((lcn, len));
-            pos += os;
-        }
-    }
-    out
-}
-
-#[inline]
-fn le16(b: &[u8], o: usize) -> Option<u16> {
-    b.get(o..o + 2).map(|s| u16::from_le_bytes([s[0], s[1]]))
-}
-#[inline]
-fn le32(b: &[u8], o: usize) -> Option<u32> {
-    b.get(o..o + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()))
-}
-#[inline]
-fn le64(b: &[u8], o: usize) -> Option<u64> {
-    b.get(o..o + 8).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn runs_decode_with_negative_offsets() {
-        // len 0x18 @ lcn 0x5634; len 0x10 @ lcn -0x100 relative; sparse 4
-        let data = [0x21, 0x18, 0x34, 0x56, 0x22, 0x10, 0x00, 0x00, 0xFF, 0x01, 0x04, 0x00];
-        let r = decode_runs(&data);
-        assert_eq!(r, vec![(0x5634, 0x18), (0x5634 - 0x100, 0x10), (-1, 4)]);
+    if changed.len() > MAX_CHANGES {
+        return Err(format!("{} items changed", changed.len()));
     }
 
-    #[test]
-    fn fixup_restores_sector_tails() {
-        let mut rec = vec![0u8; 1024];
-        rec[0..4].copy_from_slice(b"FILE");
-        rec[4..6].copy_from_slice(&0x30u16.to_le_bytes()); // usa offset
-        rec[6..8].copy_from_slice(&3u16.to_le_bytes()); // 1 + 2 sectors
-        rec[0x30..0x32].copy_from_slice(&[0xAB, 0xCD]);
-        rec[0x32..0x34].copy_from_slice(&[1, 2]);
-        rec[0x34..0x36].copy_from_slice(&[3, 4]);
-        rec[510..512].copy_from_slice(&[0xAB, 0xCD]);
-        rec[1022..1024].copy_from_slice(&[0xAB, 0xCD]);
-        assert!(fixup(&mut rec));
-        assert_eq!(&rec[510..512], &[1, 2]);
-        assert_eq!(&rec[1022..1024], &[3, 4]);
-
-        let mut torn = rec.clone();
-        torn[510..512].copy_from_slice(&[0, 0]);
-        assert!(!fixup(&mut torn));
-    }
-
-    /// Build a minimal in-use FILE record with the given attributes.
-    fn record(base: u64, dir: bool, attrs: &[Vec<u8>]) -> Vec<u8> {
-        let mut r = vec![0u8; 1024];
-        r[0..4].copy_from_slice(b"FILE");
-        r[4..6].copy_from_slice(&0x30u16.to_le_bytes());
-        r[6..8].copy_from_slice(&3u16.to_le_bytes());
-        r[0x10..0x12].copy_from_slice(&1u16.to_le_bytes()); // sequence
-        r[0x14..0x16].copy_from_slice(&0x38u16.to_le_bytes()); // first attribute
-        r[0x16..0x18].copy_from_slice(&(1u16 | if dir { 2 } else { 0 }).to_le_bytes());
-        r[0x20..0x28].copy_from_slice(&base.to_le_bytes());
-        let mut off = 0x38;
-        for a in attrs {
-            r[off..off + a.len()].copy_from_slice(a);
-            off += a.len();
+    progress.set_phase("Re-reading changed files");
+    let t1 = Instant::now();
+    let chunk = st.arenas.len() as u32;
+    let mut out = ChunkOut::default();
+    let mut todo: Vec<u64> = changed.into_iter().collect();
+    todo.sort_unstable();
+    let targets: std::collections::HashSet<u64> = todo.iter().copied().collect();
+    st.links.retain(|l| !targets.contains(&(l.target as u64)));
+    let mut i = 0;
+    while i < todo.len() {
+        let recno = todo[i] as usize;
+        i += 1;
+        if recno >= st.recs.len() {
+            st.recs.resize(recno + 1, Rec::default());
         }
-        r[off..off + 4].copy_from_slice(&AT_END.to_le_bytes());
-        r[0x18..0x1C].copy_from_slice(&((off + 8) as u32).to_le_bytes());
-        // Sector tails carry the update sequence number.
-        let (tail1, tail2) = ([r[510], r[511]], [r[1022], r[1023]]);
-        r[0x30..0x32].copy_from_slice(&[7, 7]);
-        r[0x32..0x34].copy_from_slice(&tail1);
-        r[0x34..0x36].copy_from_slice(&tail2);
-        r[510..512].copy_from_slice(&[7, 7]);
-        r[1022..1024].copy_from_slice(&[7, 7]);
-        r
-    }
-
-    fn resident(ty: u32, value: &[u8]) -> Vec<u8> {
-        let len = (24 + value.len()).div_ceil(8) * 8;
-        let mut a = vec![0u8; len];
-        a[0..4].copy_from_slice(&ty.to_le_bytes());
-        a[4..8].copy_from_slice(&(len as u32).to_le_bytes());
-        a[16..20].copy_from_slice(&(value.len() as u32).to_le_bytes());
-        a[20..22].copy_from_slice(&24u16.to_le_bytes());
-        a[24..24 + value.len()].copy_from_slice(value);
-        a
-    }
-
-    fn file_name(parent: u64, name: &str, ns: u8) -> Vec<u8> {
-        let units: Vec<u16> = name.encode_utf16().collect();
-        let mut v = vec![0u8; 66 + units.len() * 2];
-        v[0..8].copy_from_slice(&(parent | (1u64 << 48)).to_le_bytes());
-        v[64] = units.len() as u8;
-        v[65] = ns;
-        for (i, u) in units.iter().enumerate() {
-            v[66 + i * 2..68 + i * 2].copy_from_slice(&u.to_le_bytes());
+        st.recs[recno] = Rec::default();
+        let Some(mut buf) = file_record(&vol, recno as u64, st.rec_size)? else { continue };
+        if !fixup_lenient(&mut buf) {
+            continue;
         }
-        resident(AT_FILE_NAME, &v)
-    }
-
-    #[test]
-    fn parses_names_sizes_and_hard_links() {
-        let mut out = ChunkOut::default();
         let mut slot = Rec::default();
-        let mut rec = record(
-            0,
-            false,
-            &[
-                file_name(5, "REPORT~1.PDF", NS_DOS),
-                file_name(5, "report final.pdf", 1),
-                file_name(40, "linked copy.pdf", 1),
-                resident(AT_DATA, &[0u8; 100]),
-            ],
-        );
-        assert!(parse_record(&mut rec, 77, &mut slot, 0, &mut out));
-        let names = Names { arenas: std::slice::from_ref(&out.names) };
-        assert_eq!(names.get(slot.name), "report final.pdf", "long name replaces the 8.3 alias");
-        assert_eq!(slot.parent, 5);
-        assert_eq!(slot.size, 100);
-        assert_eq!(out.links.len(), 1);
-        assert_eq!(names.get(out.links[0].name), "linked copy.pdf");
-        assert_eq!(out.links[0].parent, 40);
-
-        // An extension record adds its data size to the base record.
-        let mut nonres = vec![0u8; 72];
-        nonres[0..4].copy_from_slice(&AT_DATA.to_le_bytes());
-        nonres[4..8].copy_from_slice(&72u32.to_le_bytes());
-        nonres[8] = 1;
-        nonres[32..34].copy_from_slice(&64u16.to_le_bytes());
-        nonres[40..48].copy_from_slice(&8192u64.to_le_bytes());
-        nonres[48..56].copy_from_slice(&5000u64.to_le_bytes());
-        let mut ext = record(77, false, &[nonres]);
-        let mut unused = Rec::default();
-        assert!(!parse_record(&mut ext, 90, &mut unused, 0, &mut out));
-        let (target, p) = out.partials.pop().unwrap();
-        assert_eq!(target, 77);
-        merge(&mut slot, &p, target);
-        assert_eq!((slot.size, slot.alloc), (5000, 8192));
+        parse_fixed_record(&buf, recno, &mut slot, chunk, &mut out);
+        st.recs[recno] = slot;
+        // Attributes that overflowed into extension records.
+        for ext in attribute_list_records(&buf, recno as u64) {
+            if let Some(mut e) = file_record(&vol, ext, st.rec_size)?
+                && fixup_lenient(&mut e)
+            {
+                let mut unused = Rec::default();
+                parse_fixed_record(&e, ext as usize, &mut unused, chunk, &mut out);
+            }
+        }
     }
+    let reread = todo.len();
+    st.arenas.push(out.names);
+    st.links.extend(out.links);
+    for (target, p) in out.partials {
+        if let Some(dst) = st.recs.get_mut(target)
+            && let Some(extra) = merge(dst, &p, target)
+        {
+            st.links.push(extra);
+        }
+    }
+    let reread_ms = t1.elapsed().as_millis() as u64;
+
+    progress.set_phase("Building tree");
+    let t2 = Instant::now();
+    let names = Names { arenas: &st.arenas };
+    let b = link_records(&st.root, &st.recs, &names, &st.links)?;
+    let link_ms = t2.elapsed().as_millis() as u64;
+    let t3 = Instant::now();
+    let mut info = base_info(ScanMode::Mft);
+    info.note = Some(format!("Updated {} changed item(s) from the NTFS change journal.", reread));
+    let mut tree = b.finish(st.root.clone(), info);
+    tree.info.phases = vec![
+        ("read change journal", journal_ms),
+        ("re-read changed records", reread_ms),
+        ("link records", link_ms),
+        ("aggregate", t3.elapsed().as_millis() as u64),
+    ];
+    st.journal = Some((id, next));
+    Ok(Some(tree))
+}
+
+struct JournalInfo {
+    id: u64,
+    first: i64,
+    next: i64,
+}
+
+fn ioctl(vol: &File, code: u32, input: &[u8], output: &mut [u8]) -> Result<usize, std::io::Error> {
+    use std::os::windows::io::AsRawHandle;
+    let mut returned = 0u32;
+    let ok = unsafe {
+        windows_sys::Win32::System::IO::DeviceIoControl(
+            vol.as_raw_handle() as _,
+            code,
+            input.as_ptr().cast(),
+            input.len() as u32,
+            output.as_mut_ptr().cast(),
+            output.len() as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(returned as usize) }
+}
+
+fn query_journal(vol: &File) -> Result<JournalInfo, String> {
+    use windows_sys::Win32::System::Ioctl::{FSCTL_QUERY_USN_JOURNAL, USN_JOURNAL_DATA_V0};
+    let mut out = [0u8; std::mem::size_of::<USN_JOURNAL_DATA_V0>()];
+    ioctl(vol, FSCTL_QUERY_USN_JOURNAL, &[], &mut out).map_err(|e| format!("no change journal: {e}"))?;
+    Ok(JournalInfo {
+        id: le64(&out, 0).unwrap_or(0),
+        first: le64(&out, 8).unwrap_or(0) as i64,
+        next: le64(&out, 16).unwrap_or(0) as i64,
+    })
+}
+
+/// Record numbers of everything the journal mentions between `start` and
+/// `end`, and the USN to continue from next time.
+fn read_journal(vol: &File, id: u64, start: i64, end: i64) -> Result<(std::collections::HashSet<u64>, i64), String> {
+    use windows_sys::Win32::System::Ioctl::{FSCTL_READ_USN_JOURNAL, READ_USN_JOURNAL_DATA_V0};
+    let mut changed = std::collections::HashSet::new();
+    let mut usn = start;
+    let mut buf = vec![0u8; 1 << 16];
+    while usn < end && changed.len() <= MAX_CHANGES {
+        let req = READ_USN_JOURNAL_DATA_V0 {
+            StartUsn: usn,
+            ReasonMask: u32::MAX,
+            ReturnOnlyOnClose: 0,
+            Timeout: 0,
+            BytesToWaitFor: 0,
+            UsnJournalID: id,
+        };
+        let input = unsafe {
+            std::slice::from_raw_parts((&req as *const READ_USN_JOURNAL_DATA_V0).cast::<u8>(), std::mem::size_of_val(&req))
+        };
+        let n = ioctl(vol, FSCTL_READ_USN_JOURNAL, input, &mut buf).map_err(|e| format!("reading the change journal: {e}"))?;
+        if n < 8 {
+            break;
+        }
+        let next = le64(&buf, 0).unwrap_or(0) as i64;
+        changed.extend(usn_record_numbers(&buf[8..n]));
+        if next <= usn {
+            break;
+        }
+        usn = next;
+    }
+    Ok((changed, usn))
+}
+
+/// Record `recno` as NTFS has it now, or `None` if it isn't in use.
+fn file_record(vol: &File, recno: u64, rec_size: usize) -> Result<Option<Vec<u8>>, String> {
+    use windows_sys::Win32::System::Ioctl::FSCTL_GET_NTFS_FILE_RECORD;
+    let mut out = vec![0u8; 12 + rec_size.max(4096)];
+    let input = (recno as i64).to_le_bytes();
+    ioctl(vol, FSCTL_GET_NTFS_FILE_RECORD, &input, &mut out).map_err(|e| format!("reading record {recno}: {e}"))?;
+    // NTFS returns the nearest in-use record at or below the one asked for.
+    if le64(&out, 0).unwrap_or(u64::MAX) & 0xFFFF_FFFF_FFFF != recno {
+        return Ok(None);
+    }
+    let len = (le32(&out, 8).unwrap_or(0) as usize).min(out.len() - 12);
+    Ok(Some(out[12..12 + len].to_vec()))
 }

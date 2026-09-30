@@ -4,17 +4,35 @@
 //! Safety rules, in order of importance:
 //! - Only locations named in the rule catalog are touched, and only after
 //!   their `%VAR%` placeholders resolve to a real, deep-enough folder that
-//!   isn't one of the user's or Windows' top-level folders.
+//!   isn't one of the user's or the system's top-level folders.
 //! - Symlinks and junctions are never followed or deleted.
 //! - Files that are in use are skipped, never forced. Rules whose program is
 //!   running are skipped entirely.
 //! - Cleaning deletes the files found by the analysis, not whatever happens
 //!   to be in the folder later.
+//! - System-owned files on macOS and Linux are left to the tool that owns
+//!   them (apt, journalctl, snap, …); Heft only runs it.
+//!
+//! Everything OS-specific lives in `windows.rs` / `unix.rs`.
 
+#[cfg(any(unix, test))]
+mod parse;
 pub mod rules;
+#[cfg(unix)]
+mod rules_unix;
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+pub mod vdisk;
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
+use unix as os;
+#[cfg(windows)]
+use windows as os;
 
 use std::collections::HashSet;
-use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -22,12 +40,10 @@ use std::time::SystemTime;
 
 use rayon::prelude::*;
 
-use crate::reg::{Hive, Key};
-use crate::winsys;
+pub use os::{running_processes, Special, SYSTEM};
+#[cfg(windows)]
+pub use os::{schedule_enabled, set_schedule};
 use rules::{Rule, Target};
-
-const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 /// What one rule would clean.
 #[derive(Clone, Debug, Default)]
@@ -37,15 +53,14 @@ pub struct Found {
     /// Folders that go once they're empty, deepest first.
     pub dirs: Vec<PathBuf>,
     pub bytes: u64,
-    /// Files, plus Recycle Bin items and registry values.
+    /// Files, plus Recycle Bin items, registry values, packages…
     pub items: u64,
     /// A program that must be closed first (exe name as listed in the rule).
     pub blocked_by: Option<&'static str>,
     /// The rule needs administrator rights and we don't have them.
     pub needs_admin: bool,
-    /// Registry values to delete, for `RegistryValues` targets.
-    reg_values: Vec<(String, String)>,
-    has_special: bool,
+    /// What the rule's OS-specific targets would do.
+    special: os::Pending,
 }
 
 impl Found {
@@ -60,7 +75,7 @@ impl Found {
 
     /// Clipboard / DNS: nothing to count, but still something to do.
     pub fn special_only(&self) -> bool {
-        self.has_special && self.files.is_empty() && self.reg_values.is_empty()
+        self.files.is_empty() && self.special.bare_action()
     }
 }
 
@@ -88,35 +103,24 @@ pub struct Progress {
 pub struct Env {
     pub running: HashSet<String>,
     pub elevated: bool,
+    /// Admin-only rules can ask for a password themselves (Linux `pkexec`).
+    pub can_elevate: bool,
     pub now: SystemTime,
 }
 
 impl Env {
     pub fn current() -> Env {
-        Env { running: winsys::running_processes(), elevated: crate::platform::is_elevated(), now: SystemTime::now() }
+        Env {
+            running: os::running_processes(),
+            elevated: crate::platform::is_elevated(),
+            can_elevate: os::can_elevate_tools(),
+            now: SystemTime::now(),
+        }
     }
 }
 
 // ----------------------------------------------------------------------
 // Resolving locations
-
-/// Value for a `%VAR%` placeholder. Besides the environment, Heft knows a few
-/// locations that aren't environment variables.
-fn var(name: &str) -> Option<String> {
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
-    let home = || env("USERPROFILE");
-    let v = match name.to_ascii_uppercase().as_str() {
-        "TEMP" | "TMP" => Some(std::env::temp_dir().to_string_lossy().into_owned()),
-        "LOCALLOW" => home().map(|h| format!(r"{h}\AppData\LocalLow")),
-        "CARGO_HOME" => env("CARGO_HOME").or_else(|| home().map(|h| format!(r"{h}\.cargo"))),
-        "GRADLE_USER_HOME" => env("GRADLE_USER_HOME").or_else(|| home().map(|h| format!(r"{h}\.gradle"))),
-        "STEAM" => Key::open(Hive::CurrentUser, r"Software\Valve\Steam")
-            .and_then(|k| k.get_string("SteamPath"))
-            .map(|p| p.replace('/', "\\")),
-        _ => env(name),
-    }?;
-    Some(v.trim_end_matches('\\').to_string())
-}
 
 /// Replace `%VAR%` placeholders. `None` if any of them is unknown.
 pub fn resolve(template: &str) -> Option<PathBuf> {
@@ -126,7 +130,7 @@ pub fn resolve(template: &str) -> Option<PathBuf> {
         out.push_str(&rest[..start]);
         let after = &rest[start + 1..];
         let end = after.find('%')?;
-        out.push_str(&var(&after[..end])?);
+        out.push_str(&os::var(&after[..end])?);
         rest = &after[end + 1..];
     }
     out.push_str(rest);
@@ -134,48 +138,26 @@ pub fn resolve(template: &str) -> Option<PathBuf> {
     safe_location(&p).then_some(p)
 }
 
-/// Folders a rule may never resolve to, or to a parent of.
-fn important_folders() -> Vec<String> {
-    let mut v: Vec<String> = [
-        "USERPROFILE",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "ProgramData",
-        "SystemRoot",
-        "ProgramFiles",
-        "ProgramFiles(x86)",
-        "OneDrive",
-        "PUBLIC",
-    ]
-    .iter()
-    .filter_map(|k| std::env::var(k).ok())
-    .filter(|v| !v.is_empty())
-    .collect();
-    if let Ok(root) = std::env::var("SystemRoot") {
-        v.push(format!(r"{root}\System32"));
-    }
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        for sub in ["Documents", "Desktop", "Downloads", "Pictures", "Music", "Videos", r"AppData\LocalLow"] {
-            v.push(format!(r"{home}\{sub}"));
-        }
-    }
-    v.into_iter().map(|s| s.trim_end_matches('\\').to_lowercase()).collect()
-}
-
 /// Defence in depth against a bad rule or odd environment: the location must
-/// be absolute, at least two folders deep, and not one of the user's or
-/// Windows' important folders (or a parent of one).
+/// be absolute, at least two folders deep, and not one of the user's or the
+/// system's important folders (or a parent of one).
 pub fn safe_location(p: &Path) -> bool {
     let mut comps = p.components();
-    if !matches!(comps.next(), Some(Component::Prefix(_))) || !matches!(comps.next(), Some(Component::RootDir)) {
+    if cfg!(windows) && !matches!(comps.next(), Some(Component::Prefix(_))) {
+        return false;
+    }
+    if !matches!(comps.next(), Some(Component::RootDir)) {
         return false;
     }
     let rest: Vec<Component> = comps.collect();
     if rest.len() < 2 || rest.iter().any(|c| !matches!(c, Component::Normal(_))) {
         return false;
     }
-    let s = p.to_string_lossy().trim_end_matches('\\').to_lowercase();
-    !important_folders().iter().any(|f| *f == s || f.starts_with(&format!("{s}\\")))
+    // Compared without case everywhere: stricter than needed on Linux.
+    let sep = crate::platform::SEP;
+    let norm = |s: &str| s.trim_end_matches(sep).to_lowercase();
+    let s = norm(&p.to_string_lossy());
+    !os::important_folders().iter().map(|f| norm(f)).any(|f| f == s || f.starts_with(&format!("{s}{sep}")))
 }
 
 /// Case-insensitive `*` wildcard match.
@@ -200,15 +182,11 @@ pub fn wildcard(pattern: &str, name: &str) -> bool {
     true
 }
 
-fn is_link(md: &std::fs::Metadata) -> bool {
-    md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
 /// Subfolders of `root`, never following links.
 fn subdirs(root: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(root) else { return Vec::new() };
     rd.flatten()
-        .filter(|e| e.metadata().is_ok_and(|m| m.is_dir() && !is_link(&m)))
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_dir() && !os::is_link(&m)))
         .map(|e| e.path())
         .collect()
 }
@@ -274,7 +252,7 @@ fn scan_dir(dir: &Path, own: Option<SystemTime>, cutoff: Option<SystemTime>, roo
             out.pinned = true;
             continue;
         };
-        if is_link(&md) {
+        if os::is_link(&md) {
             // Links are never followed or deleted.
             out.pinned = true;
         } else if md.is_dir() {
@@ -321,7 +299,7 @@ impl Collector {
     /// removal when `remove_self` is set.
     fn add(&mut self, path: &Path, remove_self: bool, cancel: &AtomicBool) {
         let Ok(md) = std::fs::symlink_metadata(path) else { return };
-        if is_link(&md) {
+        if os::is_link(&md) {
             return;
         }
         if md.is_dir() {
@@ -341,7 +319,7 @@ impl Collector {
 pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
     let rule = &rules::all()[rule_index];
     let mut found = Found { rule: rule_index, ..Default::default() };
-    found.needs_admin = rule.admin && !env.elevated;
+    found.needs_admin = rule.admin && !env.elevated && !env.can_elevate;
     found.blocked_by = rule.close.iter().copied().find(|exe| env.running.contains(*exe));
 
     let mut c = Collector::new(None);
@@ -384,19 +362,9 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
                     }
                 }
             }
-            Target::RecycleBin => {
-                found.has_special = true;
-                if let Some((bytes, items)) = winsys::recycle_bin_info() {
-                    found.bytes += bytes;
-                    found.items += items;
-                }
-            }
-            Target::Clipboard | Target::DnsCache => found.has_special = true,
-            Target::RegistryValues(path) => {
-                if let Some(k) = Key::open(Hive::CurrentUser, path) {
-                    for v in k.values() {
-                        found.reg_values.push((path.to_string(), v.name));
-                    }
+            Target::Special(s) => {
+                if !cancel.load(Ordering::Relaxed) {
+                    os::analyze_special(s, &mut found.special);
                 }
             }
         }
@@ -409,8 +377,8 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
     c.dirs.dedup();
     c.dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
 
-    found.bytes += c.files.iter().map(|f| f.1).sum::<u64>();
-    found.items += (c.files.len() + found.reg_values.len()) as u64;
+    found.bytes = c.files.iter().map(|f| f.1).sum::<u64>() + found.special.bytes();
+    found.items = c.files.len() as u64 + found.special.items();
     found.files = c.files;
     found.dirs = c.dirs;
     found
@@ -434,24 +402,6 @@ pub fn analyze_all(rules: Vec<usize>, tx: crossbeam_channel::Sender<Found>, p: &
 // ----------------------------------------------------------------------
 // Cleaning
 
-fn remove_file(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            // Read-only files can't be deleted until the flag is cleared.
-            let md = std::fs::symlink_metadata(path)?;
-            if md.file_attributes() & FILE_ATTRIBUTE_READONLY == 0 {
-                return Err(e);
-            }
-            let mut perm = md.permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
-            perm.set_readonly(false);
-            std::fs::set_permissions(path, perm)?;
-            std::fs::remove_file(path)
-        }
-        r => r,
-    }
-}
-
 /// Delete what `found` lists. Re-checks running programs first.
 pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned {
     let rule = found.rule();
@@ -473,7 +423,7 @@ pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned 
         if p.cancel.load(Ordering::Relaxed) {
             return;
         }
-        match remove_file(path) {
+        match os::remove_file(path) {
             Ok(()) => {
                 removed.fetch_add(1, Ordering::Relaxed);
                 freed.fetch_add(*size, Ordering::Relaxed);
@@ -494,29 +444,14 @@ pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned 
     out.freed = freed.into_inner();
     out.skipped = skipped.into_inner();
 
-    let mut notes = Vec::new();
-    for t in rule.targets {
-        let r = match t {
-            Target::RecycleBin => winsys::empty_recycle_bin().map(|_| {
-                out.freed += found.bytes.saturating_sub(found.files.iter().map(|f| f.1).sum());
-                out.removed += found.items.saturating_sub(found.files.len() as u64);
-            }),
-            Target::Clipboard => winsys::clear_clipboard(),
-            Target::DnsCache => winsys::flush_dns(),
-            _ => Ok(()),
-        };
-        if let Err(e) = r {
-            notes.push(e);
+    if !p.cancel.load(Ordering::Relaxed) {
+        let sp = os::clean_special(&found.special);
+        out.freed += sp.freed;
+        out.removed += sp.removed;
+        out.skipped += sp.skipped;
+        if !sp.notes.is_empty() {
+            out.note = Some(sp.notes.join("; "));
         }
-    }
-    for (path, name) in &found.reg_values {
-        match Key::open_writable(Hive::CurrentUser, path).and_then(|k| k.delete_value(name)) {
-            Ok(()) => out.removed += 1,
-            Err(_) => out.skipped += 1,
-        }
-    }
-    if !notes.is_empty() {
-        out.note = Some(notes.join("; "));
     }
     out
 }
@@ -569,44 +504,6 @@ pub fn save_selection(on: &HashSet<usize>) -> std::io::Result<()> {
     std::fs::write(f, text)
 }
 
-// ----------------------------------------------------------------------
-// Scheduled cleaning (Task Scheduler)
-
-const TASK_NAME: &str = r"Heft\Weekly clean";
-
-pub fn schedule_enabled() -> bool {
-    use std::os::windows::process::CommandExt;
-    std::process::Command::new("schtasks.exe")
-        .args(["/Query", "/TN", TASK_NAME])
-        .creation_flags(winsys::CREATE_NO_WINDOW)
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-/// Create or remove a weekly task that runs `heft --clean` with the saved
-/// selection. As administrator the task runs elevated so admin-only rules
-/// are included.
-pub fn set_schedule(on: bool) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    let mut cmd = std::process::Command::new("schtasks.exe");
-    if on {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let tr = format!("\"{}\" --clean", exe.display());
-        cmd.args(["/Create", "/F", "/TN", TASK_NAME, "/SC", "WEEKLY", "/D", "SUN", "/ST", "12:00", "/TR", &tr]);
-        if crate::platform::is_elevated() {
-            cmd.args(["/RL", "HIGHEST"]);
-        }
-    } else {
-        cmd.args(["/Delete", "/F", "/TN", TASK_NAME]);
-    }
-    let out = cmd.creation_flags(winsys::CREATE_NO_WINDOW).output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -630,6 +527,7 @@ mod tests {
         assert!(!wildcard("ab*ba", "aba"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn resolves_and_refuses() {
         assert!(resolve(r"%LOCALAPPDATA%\Google\Chrome\User Data").is_some());
@@ -644,6 +542,23 @@ mod tests {
         assert!(!safe_location(Path::new(r"relative\path\here")));
         assert!(!safe_location(Path::new(r"C:\a\..\Windows")));
         assert!(resolve(r"%SystemRoot%\Temp").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_and_refuses() {
+        assert!(resolve("%CACHE%/pip").is_some());
+        assert!(resolve("%HOME%/.npm/_cacache").is_some());
+        assert!(resolve("%HEFT_NO_SUCH_VAR%/x").is_none());
+        // Too shallow or an important folder.
+        assert!(resolve("%CACHE%").is_none());
+        assert!(resolve("%HOME%/Documents").is_none());
+        assert!(resolve("%HOME%/.config").is_none());
+        assert!(!safe_location(Path::new("/var/cache")));
+        assert!(!safe_location(Path::new("/usr")));
+        assert!(!safe_location(Path::new("relative/path/here")));
+        assert!(!safe_location(Path::new("/home/x/../../etc")));
+        assert!(safe_location(Path::new("/var/cache/apt/archives")));
     }
 
     #[test]
@@ -737,6 +652,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn never_follows_symlinks() {
+        let d = temp_dir("symlink");
+        let outside = temp_dir("symlink-target");
+        std::fs::write(outside.join("precious.txt"), b"keep me").unwrap();
+        std::fs::create_dir_all(d.join("cache")).unwrap();
+        std::os::unix::fs::symlink(&outside, d.join("cache").join("link")).unwrap();
+        std::os::unix::fs::symlink(outside.join("precious.txt"), d.join("cache").join("file-link")).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut c = Collector::new(None);
+        c.add(&d.join("cache"), false, &cancel);
+        assert!(c.files.is_empty(), "{:?}", c.files);
+        assert!(outside.join("precious.txt").exists());
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(windows)]
     #[test]
     fn never_follows_junctions() {
         let d = temp_dir("junction");
