@@ -13,7 +13,7 @@ zip=$2
 out=$3
 
 id=gjnail.Heft
-schema=1.10.0
+schema=1.12.0
 repo=https://github.com/gjnail/heft
 url="$repo/releases/download/v$version/$(basename "$zip")"
 sha256=$(sha256sum < "$zip" | cut -d' ' -f1 | tr a-f A-F)
