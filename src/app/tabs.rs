@@ -62,8 +62,8 @@ impl HeftApp {
             let right = rect.right() - 6.0;
             p.text(pos2(right, cy), Align2::RIGHT_CENTER, format!("{} files", fmt_count(count)), FontId::proportional(11.5), ui.visuals().weak_text_color());
             p.text(pos2(right - 90.0, cy), Align2::RIGHT_CENTER, fmt_size(size), FontId::proportional(13.0), ui.visuals().text_color());
-            share_bar(ui, Rect::from_min_size(pos2(right - 210.0, cy - 5.0), vec2(56.0, 10.0)), size as f32 / total as f32, to_color32(cat.color()));
-            ui.painter().text(pos2(right - 150.0, cy), Align2::LEFT_CENTER, format!("{:.1}%", pct(size, total)), FontId::proportional(11.5), ui.visuals().weak_text_color());
+            share_bar(ui, Rect::from_min_size(pos2(right - 250.0, cy - 5.0), vec2(56.0, 10.0)), size as f32 / total as f32, to_color32(cat.color()));
+            ui.painter().text(pos2(right - 150.0, cy), Align2::RIGHT_CENTER, format!("{:.1}%", pct(size, total)), FontId::proportional(11.5), ui.visuals().weak_text_color());
             if resp.clicked() {
                 self.actions.push(Action::SetHighlight(Highlight::Category(cat)));
                 if self.color_mode != ColorMode::Category && self.color_mode != ColorMode::Extension {
@@ -102,8 +102,8 @@ impl HeftApp {
                     let right = rect.right() - 6.0;
                     p.text(pos2(right, cy), Align2::RIGHT_CENTER, format!("{} files", fmt_count(e.count)), FontId::proportional(11.5), ui.visuals().weak_text_color());
                     p.text(pos2(right - 90.0, cy), Align2::RIGHT_CENTER, fmt_size(e.size), FontId::proportional(13.0), ui.visuals().text_color());
-                    p.text(pos2(right - 150.0, cy), Align2::LEFT_CENTER, format!("{:.1}%", pct(e.size, total)), FontId::proportional(11.5), ui.visuals().weak_text_color());
-                    p.text(pos2(right - 250.0, cy), Align2::LEFT_CENTER, e.category.label(), FontId::proportional(11.0), ui.visuals().weak_text_color());
+                    p.text(pos2(right - 150.0, cy), Align2::RIGHT_CENTER, format!("{:.1}%", pct(e.size, total)), FontId::proportional(11.5), ui.visuals().weak_text_color());
+                    p.text(pos2(right - 310.0, cy), Align2::LEFT_CENTER, e.category.label(), FontId::proportional(11.0), ui.visuals().weak_text_color());
                     if resp.clicked() {
                         self.actions.push(Action::SetHighlight(Highlight::Ext(i as u16)));
                     }

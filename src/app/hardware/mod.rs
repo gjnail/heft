@@ -157,7 +157,7 @@ impl Hardware {
     }
 
     /// Debug builds only, for checking the page without driving the mouse:
-    /// HEFT_DEBUG_HW_VIEW=table, HEFT_DEBUG_HW_FOCUS=<sensor label>, and
+    /// HEFT_DEBUG_HW_VIEW=table or dashboard, HEFT_DEBUG_HW_FOCUS=<sensor label>, and
     /// HEFT_DEBUG_SCREENSHOT=<file.png> to save the window after a few
     /// seconds (HEFT_DEBUG_SCREENSHOT_DELAY) and quit.
     #[cfg(debug_assertions)]
@@ -171,8 +171,10 @@ impl Hardware {
                 Some("light") => ctx.set_theme(egui::Theme::Light),
                 _ => {}
             }
-            if env("HEFT_DEBUG_HW_VIEW").as_deref() == Some("table") {
-                self.vs.view = View::Table;
+            match env("HEFT_DEBUG_HW_VIEW").as_deref() {
+                Some("table") => self.vs.view = View::Table,
+                Some("dashboard") => self.vs.view = View::Dashboard,
+                _ => {}
             }
             if let Some(label) = env("HEFT_DEBUG_HW_FOCUS") {
                 let snap = monitor.lock();
@@ -186,22 +188,8 @@ impl Hardware {
             }
         }
         let Some(path) = env("HEFT_DEBUG_SCREENSHOT") else { return };
-        let shot = ctx.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                _ => None,
-            })
-        });
-        if let Some(img) = shot {
-            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-            if let Ok(file) = std::fs::File::create(&path) {
-                let mut enc = png::Encoder::new(std::io::BufWriter::new(file), img.size[0] as u32, img.size[1] as u32);
-                enc.set_color(png::ColorType::Rgba);
-                enc.set_depth(png::BitDepth::Eight);
-                if let Ok(mut w) = enc.write_header() {
-                    let _ = w.write_image_data(&bytes);
-                }
-            }
+        if let Some(img) = super::debug_shot::taken(ctx) {
+            super::debug_shot::save(&path, &img);
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }

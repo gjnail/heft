@@ -5,6 +5,8 @@ mod hardware;
 mod screens;
 mod alerts_view;
 mod compress_view;
+#[cfg(debug_assertions)]
+mod debug_shot;
 mod live;
 mod relocate_view;
 mod removed_view;
@@ -1211,6 +1213,10 @@ impl HeftApp {
 impl eframe::App for HeftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
+        debug_shot::frame(&ctx, self.workspace == Workspace::Hardware);
+        #[cfg(all(debug_assertions, not(any(windows, target_os = "linux"))))]
+        debug_shot::frame(&ctx, false);
         self.poll(&ctx);
         self.list_hover = None;
         if self.workspace == Workspace::Disk {
