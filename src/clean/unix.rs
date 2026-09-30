@@ -626,11 +626,18 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         assert!(!root_may_remove(&d.join("file")));
         assert!(!root_may_remove(Path::new("relative/file")));
-        if !crate::platform::is_elevated() {
-            // Nobody but root may write to / or /usr.
-            assert!(root_may_remove(Path::new("/usr/share/heft-no-such-file")));
-            assert!(!root_may_remove(Path::new("/usr/share/heft\nno-such-file")));
+        // Where nobody but root may write to /, /usr and /usr/share. GitHub's
+        // Ubuntu runners make /usr/share writable for everyone, and there
+        // root must not remove anything from it.
+        let locked = |dir: &Path| {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(dir).is_ok_and(|m| m.uid() == 0 && m.mode() & 0o022 == 0)
+        };
+        let path = Path::new("/usr/share/heft-no-such-file");
+        if !crate::platform::is_elevated() && path.ancestors().skip(1).all(locked) {
+            assert!(root_may_remove(path));
         }
+        assert!(!root_may_remove(Path::new("/usr/share/heft\nno-such-file")));
         let _ = std::fs::remove_dir_all(&d);
     }
 
