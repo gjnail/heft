@@ -1,0 +1,33 @@
+Third-party licenses
+====================
+
+Heft itself is under the MIT license (see LICENSE). It is built with the
+open-source Rust libraries listed below, grouped by license, followed by the
+text of each license.
+
+The Windows version also contains three unmodified PawnIO modules
+(AMDFamily17, IntelMSR and LpcIO) from PawnIO.Modules 0.2.11 by namazso,
+under the GNU Lesser General Public License 2.1 or later. The license text is
+in PAWNIO-LICENSE.txt in the Windows download, and the modules' source code
+is at https://github.com/namazso/PawnIO.Modules.
+
+Overview
+--------
+{{#each overview}}
+{{{name}}}
+{{/each}}
+{{#each licenses}}
+{{#unless (eq used_by.[0].crate.name "heft")}}
+
+================================================================================
+{{{name}}}
+================================================================================
+
+Used by:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}}  {{{crate.repository}}}{{/if}}
+{{/each}}
+
+{{{text}}}
+{{/unless}}
+{{/each}}

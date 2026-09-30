@@ -57,16 +57,17 @@ PublisherUrl: https://github.com/gjnail
 PublisherSupportUrl: $repo/issues
 Author: Greg Nail and the Heft contributors
 PackageName: Heft
-PackageUrl: $repo
+PackageUrl: https://gjnail.github.io/heft/
 License: MIT
 LicenseUrl: $repo/blob/main/LICENSE
 Copyright: Copyright (c) 2026 Greg Nail and the Heft contributors
-ShortDescription: Disk usage analyzer and cleanup tool
+ShortDescription: Disk usage analyzer and PC cleaner
 Description: |-
   Heft shows where your disk space went, with a treemap of every file, a folder tree,
-  a largest files list, a duplicate finder and scan history. On Windows it also has a
-  junk cleaner, startup programs, installed programs with leftover checks, and a narrow
-  registry check. It runs locally and doesn't send data anywhere.
+  cleanup suggestions, search, a duplicate finder and scan history. It also has a junk
+  cleaner, a hardware monitor, startup programs, installed programs with leftover checks
+  and updates through winget, and a narrow registry check. It explains what something
+  is before you remove it, and runs locally without sending data anywhere.
 Moniker: heft
 Tags:
 - disk-usage
@@ -75,6 +76,9 @@ Tags:
 - treemap
 - duplicate-finder
 - cleaner
+- hardware-monitor
+- windirstat
+- wiztree
 ReleaseNotesUrl: $repo/releases/tag/v$version
 ManifestType: defaultLocale
 ManifestVersion: $schema

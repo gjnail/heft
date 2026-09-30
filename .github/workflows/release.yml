@@ -55,6 +55,21 @@ jobs:
           name: release-notes
           path: notes.md
 
+      # The licenses of every Rust library Heft uses, for all three
+      # downloads. Fails if a dependency's license isn't accepted in
+      # about.toml.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - name: Third-party licenses
+        run: cargo about generate --locked about.hbs -o THIRD-PARTY-LICENSES.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: third-party-licenses
+          path: THIRD-PARTY-LICENSES.txt
+
   windows:
     name: Windows
     needs: version
@@ -133,11 +148,17 @@ jobs:
           }
           Copy-Item target/signed/heft.exe target/release/heft.exe -Force
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: third-party-licenses
+
+      # heft.exe embeds the PawnIO modules, so their LGPL text ships too.
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Compress-Archive -Path target/release/heft.exe, LICENSE -DestinationPath "dist/heft-$env:VERSION-windows-x86_64.zip"
+          Copy-Item assets/pawnio/COPYING PAWNIO-LICENSE.txt
+          Compress-Archive -Path target/release/heft.exe, LICENSE, THIRD-PARTY-LICENSES.txt, PAWNIO-LICENSE.txt -DestinationPath "dist/heft-$env:VERSION-windows-x86_64.zip"
 
       - name: winget manifests
         shell: bash
@@ -165,6 +186,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # bundle-macos.sh copies the licenses into the app before signing it.
+      - uses: actions/download-artifact@v8
+        with:
+          name: third-party-licenses
 
       - run: bash scripts/bundle-macos.sh
 
@@ -204,12 +230,16 @@ jobs:
           cat bench.txt
           grep -q "^files" bench.txt
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: third-party-licenses
+
       # scripts/install-linux.sh uses the included binary instead of building.
       - name: Package
         run: |
           name=heft-$VERSION-linux-x86_64
           mkdir -p "$name/scripts" "$name/packaging/linux" dist
-          cp target/release/heft LICENSE README.md "$name/"
+          cp target/release/heft LICENSE THIRD-PARTY-LICENSES.txt README.md "$name/"
           cp scripts/install-linux.sh "$name/scripts/"
           cp packaging/linux/heft.desktop "$name/packaging/linux/"
           tar -czf "dist/$name.tar.gz" "$name"

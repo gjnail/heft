@@ -63,6 +63,14 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# License texts. THIRD-PARTY-LICENSES.txt only exists when the release
+# workflow has generated it. They go in before signing, which seals the app.
+for f in LICENSE THIRD-PARTY-LICENSES.txt; do
+    if [ -f "$f" ]; then
+        cp "$f" "$app/Contents/Resources/"
+    fi
+done
+
 # Ad-hoc signature so a locally built app runs without Gatekeeper complaints.
 codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
 

@@ -32,6 +32,21 @@ release. Use it after changing the workflow, the packaging scripts or
 If something is wrong before publishing, delete the draft and the tag
 (`git push origin :vx.y.z`), fix it, and tag again.
 
+## Licenses
+
+Every download includes `THIRD-PARTY-LICENSES.txt`, the licenses of the Rust
+libraries Heft is built with, and the Windows zip also has
+`PAWNIO-LICENSE.txt` for the embedded PawnIO modules. The Check version job
+generates the first with [cargo-about](https://github.com/EmbarkStudios/cargo-about)
+from `about.toml` and `about.hbs`, and fails if a dependency uses a license
+that isn't in `about.toml`'s accepted list. If that happens, check the
+license is fine to ship with Heft and add it. To see the file locally:
+
+```
+cargo install cargo-about --locked --features cli
+cargo about generate --locked about.hbs -o THIRD-PARTY-LICENSES.txt
+```
+
 ## winget
 
 The Windows job writes three manifest files for the `gjnail.Heft` package and
