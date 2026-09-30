@@ -6,6 +6,15 @@ Notable changes to Heft. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-29
+
+### Fixed
+
+- File types tab: the percentage no longer overlaps the size.
+- The downloads now include the licenses of the libraries Heft is built with
+  (`THIRD-PARTY-LICENSES.txt`) and, on Windows, of the PawnIO modules
+  (`PAWNIO-LICENSE.txt`). On macOS they're in the app's Resources folder.
+
 ## [1.0.0] - 2026-09-29
 
 First public version.

@@ -1,6 +1,6 @@
 [package]
 name = "heft"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Disk usage analyzer and cleanup tool with a treemap, duplicate finder and scan history"
 license = "MIT"
