@@ -6,6 +6,8 @@ Notable changes to Heft. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-30
+
 The Mac version catches up with Windows: every page Windows has now has a Mac
 counterpart, tested on an Apple silicon Mac.
 
