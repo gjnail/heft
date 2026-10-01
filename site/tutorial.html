@@ -39,6 +39,7 @@
       <li><a href="guides/cleaner.html">The Cleaner</a></li>
       <li><a href="guides/hardware.html">Hardware monitor</a></li>
       <li><a href="guides/windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="guides/mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="guides/alerts.html">Free space alerts</a></li>
       <li><a href="guides/command-line.html">Command line</a></li>
     </ul>
@@ -105,7 +106,7 @@
       <li>Click any item to see it in the map before you decide.</li>
       <li>Press <strong>Move selected to the Recycle Bin</strong> when you're happy with the selection.</li>
     </ul>
-    <p>Some suggestions aren't things Heft deletes. The hibernation file and a leftover <code>Windows.old</code> folder, for example, come with the steps to remove them with Windows' own tools, because that's the safe way to do it.</p>
+    <p>Some suggestions aren't things Heft deletes. The hibernation file and a leftover <code>Windows.old</code> folder, for example, come with the steps to remove them with Windows' own tools, because that's the safe way to do it. On a Mac, iPhone backups and Time Machine's local snapshots work the same way.</p>
 
     <h2 id="hunt" class="step-title"><span class="n">5</span>Look for big files yourself</h2>
     <figure class="shot">
@@ -130,7 +131,7 @@
     <p>Files go to the Recycle Bin or Trash, not straight into oblivion. The space comes back when you empty it.</p>
 
     <h2 id="undo" class="step-title"><span class="n">7</span>Put something back</h2>
-    <p>Deleted the wrong thing? The <strong>Removed</strong> tab lists everything Heft has moved to the Recycle Bin or Trash. On Windows and Linux, select items and press <strong>Put back</strong>. On macOS, open the Trash in Finder and use Put Back. Rescan to see them in the map again.</p>
+    <p>Deleted the wrong thing? The <strong>Removed</strong> tab lists everything Heft has moved to the Recycle Bin or Trash. Select items and press <strong>Put back</strong>, then rescan to see them in the map again. On a Mac, items removed with an earlier version of Heft have to be put back from Finder: open the Trash, right-click an item and choose Put Back.</p>
 
     <h2 id="cleaner" class="step-title"><span class="n">8</span>Clear caches with the Cleaner</h2>
     <figure class="shot">
@@ -142,6 +143,7 @@
       <li>Click a row in the results to see exactly which files would be removed.</li>
       <li>A program that's running is skipped. Close it and press <strong>Analyze</strong> again to include it.</li>
       <li><strong>Recommended</strong> resets the selection to caches and temporary files only. Cookies and history are never ticked for you.</li>
+      <li>On a Mac, items that need your administrator password are marked 🛡. Heft cleans everything else first, then macOS asks for the password once, at the end.</li>
     </ul>
     <p>Press <strong>Clean</strong> when you're ready. These files are deleted rather than recycled, because programs rebuild them anyway, and the confirmation says so.</p>
 
@@ -150,7 +152,7 @@
     <ul>
       <li><strong>Scan again in a few weeks.</strong> Heft saves a small snapshot after every scan, and the Changes tab shows which folders grew since. See <a href="guides/disk-usage.html#changes">Changes over time</a>.</li>
       <li><strong>Turn on free space alerts</strong> in the View menu to get a notification when a drive is nearly full. See <a href="guides/alerts.html">Free space alerts</a>.</li>
-      <li><strong>Schedule the Cleaner</strong> on Windows to run every Sunday. See <a href="guides/cleaner.html#weekly">Weekly cleaning</a>.</li>
+      <li><strong>Schedule the Cleaner</strong> to run every Sunday, on Windows or a Mac. See <a href="guides/cleaner.html#weekly">Weekly cleaning</a>.</li>
       <li><strong>Save space without deleting</strong> by replacing duplicates with links or compressing games you rarely update. See <a href="guides/duplicates.html">Duplicates and saving space</a>.</li>
     </ul>
 

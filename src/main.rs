@@ -12,6 +12,8 @@ mod dupes;
 mod export;
 mod history;
 mod icon;
+#[cfg(target_os = "macos")]
+mod mac;
 mod monitor;
 mod platform;
 mod recommend;
@@ -25,7 +27,6 @@ mod regclean;
 mod relocate;
 mod scan;
 mod search;
-#[cfg(any(windows, target_os = "linux"))]
 mod sensors;
 #[cfg(windows)]
 mod startup;
@@ -59,6 +60,11 @@ fn main() -> std::process::ExitCode {
             .with_min_inner_size([820.0, 520.0])
             .with_icon(app_icon()),
         ..Default::default()
+    };
+    #[cfg(target_os = "macos")]
+    let options = {
+        std::thread::spawn(mac::follow_move);
+        mac::menubar::launch_options(options, args.iter().any(|a| a == "--tray"))
     };
     let result = eframe::run_native(
         "Heft",

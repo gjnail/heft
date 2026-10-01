@@ -39,6 +39,7 @@
       <li><a href="guides/cleaner.html">The Cleaner</a></li>
       <li><a href="guides/hardware.html">Hardware monitor</a></li>
       <li><a href="guides/windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="guides/mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="guides/alerts.html">Free space alerts</a></li>
       <li><a href="guides/command-line.html">Command line</a></li>
     </ul>
@@ -80,10 +81,22 @@
       </ul>
     </details>
 
+    <details id="mac-admin">
+      <summary>When does Heft ask for my administrator password on a Mac?</summary>
+      <p>Heft never needs to run as administrator on a Mac. It asks for your password only when you do something that changes files outside your home folder, and then only once for everything you chose:</p>
+      <ul>
+        <li>cleaning system logs or the DNS cache on the Cleaner page;</li>
+        <li>turning launch daemons on or off, or removing launch agents and daemons installed for all users, on the Login items page;</li>
+        <li>uninstalling an app installed for all users, or moving leftovers that belong to the system, on the Apps page;</li>
+        <li>fixing or restoring broken items outside your home folder.</li>
+      </ul>
+      <p>The prompt comes from macOS itself; Heft never sees your password. The Hardware page reads every sensor without it.</p>
+    </details>
+
     <h2 id="sizes">Sizes and scanning</h2>
 
     <details id="explorer-size">
-      <summary>Why does Heft show a different size than Explorer or another tool?</summary>
+      <summary>Why does Heft show a different size than Explorer, Finder or another tool?</summary>
       <p>Usually because Heft counts more carefully:</p>
       <ul>
         <li><strong>Hard links are counted once.</strong> Windows keeps many system files under two names; tools that count both can over-count by tens of gigabytes.</li>
@@ -101,11 +114,12 @@
     <details id="slow">
       <summary>The scan is slow.</summary>
       <p>On Windows, run Heft as administrator and leave <strong>Fast scan</strong> ticked; on an NTFS drive that's usually a few seconds even for millions of files. After that, <strong>Rescan</strong> only reads what changed. Network drives and drives that aren't NTFS always use the slower folder scan.</p>
+      <p>On a Mac, the first scan lists every folder, but after that <strong>Rescan</strong> only lists the folders macOS has logged changes in, on any local disk and without special permission. <strong>View &gt; Update automatically</strong> keeps the map current. Network shares always get a full scan.</p>
     </details>
 
     <details id="macos-fda">
       <summary>On macOS, some folders are missing from the scan.</summary>
-      <p>macOS protects folders such as Mail and the Trash. Give Heft <strong>Full Disk Access</strong> in System Settings &gt; Privacy &amp; Security to include them.</p>
+      <p>macOS protects folders such as Mail and the Trash. Give Heft <strong>Full Disk Access</strong> in System Settings &gt; Privacy &amp; Security to include them. The Cleaner needs it too, to see inside the Trash, Safari's cache and Recent items, and to list Safari's cookies, history and last session and new Teams' cache.</p>
     </details>
 
     <h2 id="safety">Safety</h2>
@@ -118,14 +132,14 @@
         <li>System files, programs, app data and other risky locations are marked, and explained before you can delete them. Anything that could stop the computer from starting needs an extra confirmation.</li>
         <li>Suggestions leave out anything risky, and only pre-select clearly disposable files.</li>
         <li>The Cleaner only touches a fixed list of known cache locations, and shows the exact files first.</li>
-        <li>Every registry change is backed up first.</li>
+        <li>Every registry change on Windows, and every change to launch agents, login items and other entries on a Mac, is backed up first.</li>
       </ul>
       <p>If you ever think Heft could delete the wrong files, please report it privately as described in the project's <a href="https://github.com/gjnail/heft/blob/main/SECURITY.md">security policy</a>.</p>
     </details>
 
     <details id="undo-delete">
       <summary>I deleted the wrong thing. Can I get it back?</summary>
-      <p>Yes, as long as the Recycle Bin or Trash hasn't been emptied. Open the <strong>Removed</strong> tab: on Windows and Linux select the items and press <strong>Put back</strong>; on macOS press <strong>Open the Trash</strong> and use Put Back in Finder. Files removed by the Cleaner are caches and are deleted directly, so they can't be restored, but the programs that use them recreate them.</p>
+      <p>Yes, as long as the Recycle Bin or Trash hasn't been emptied. Open the <strong>Removed</strong> tab, select the items and press <strong>Put back</strong>. On a Mac, items removed with an earlier version of Heft have to be put back from Finder: press <strong>Open the Trash</strong>, right-click an item and choose Put Back. Files removed by the Cleaner are caches and are deleted directly, so they can't be restored, but the programs that use them recreate them.</p>
     </details>
 
     <details id="undo-registry">
@@ -133,9 +147,14 @@
       <p>Open the <strong>Registry</strong> page and find the backup in the <strong>Backups</strong> list at the bottom, then press <strong>Restore</strong>. The backups are ordinary <code>.reg</code> files in <code>%LOCALAPPDATA%\Heft\backups</code>, so you can also double-click one to merge it back in.</p>
     </details>
 
+    <details id="undo-mac">
+      <summary>How do I undo a change on the Login items or Broken items page?</summary>
+      <p>If you only turned an item off, tick it again. Anything Heft removed or fixed was backed up first: open the <strong>Broken items</strong> page, find the backup in the <strong>Backups</strong> list at the bottom, and press <strong>Restore…</strong>. The backups are in <code>~/Library/Application Support/Heft/backups</code>. Launch agents and daemons load again the next time you sign in or restart. See <a href="guides/mac-tools.html#backups">Backups</a>.</p>
+    </details>
+
     <details id="registry-speed">
       <summary>Will fixing registry issues make my PC faster?</summary>
-      <p>No. No registry cleaner will, whatever it claims. Heft's Registry page is housekeeping: it removes entries that point to things that no longer exist, such as uninstall entries for programs that are gone. That tidies Apps &amp; Features and the startup list, nothing more.</p>
+      <p>No. No registry cleaner will, whatever it claims. Heft's Registry page is housekeeping: it removes entries that point to things that no longer exist, such as uninstall entries for programs that are gone. That tidies Apps &amp; Features and the startup list, nothing more. The same goes for the Broken items page on a Mac: it stops macOS trying to start programs that are gone, and tidies up after deleted apps.</p>
     </details>
 
     <details id="cookies">
@@ -152,19 +171,20 @@
 
     <details id="fans">
       <summary>My motherboard's fans and voltages don't show up.</summary>
-      <p>Heft reads the Nuvoton sensor chips (NCT679x and NCT6701D) found on most ASUS and ASRock boards, through PawnIO. Gigabyte boards (ITE chips) and MSI boards with the NCT6687D aren't supported yet. On Linux, fans appear when your kernel has a driver for the chip; check <code>sensors</code> from lm-sensors.</p>
+      <p>Heft reads the Nuvoton sensor chips (NCT679x and NCT6701D) found on most ASUS and ASRock boards, through PawnIO. Gigabyte boards (ITE chips) and MSI boards with the NCT6687D aren't supported yet. On Linux, fans appear when your kernel has a driver for the chip; check <code>sensors</code> from lm-sensors. On a Mac, fans are read without a driver, and a Mac without a fan, such as a MacBook Air, has none to show.</p>
     </details>
 
     <details id="mac-hardware">
-      <summary>Why is there no Hardware page on macOS?</summary>
-      <p>Heft doesn't have a way to read Mac sensors yet. Disk usage and the Cleaner work on macOS.</p>
+      <summary>Does the Hardware page need a password or a driver on a Mac?</summary>
+      <p>No. On a Mac, Heft reads everything without an administrator password or a driver: CPU and GPU temperature, load and clock speed per core (performance and efficiency cores on Apple silicon), power for the CPU, GPU, Neural Engine and memory, fan speeds and whole-system power, drive temperature, wear and throughput, network speed, and the battery's charge, wear, cycle count and charge rate.</p>
+      <p>It has been tested on Apple silicon. Intel Macs haven't been tried yet, so reports are welcome. See <a href="guides/hardware.html#what">What Heft can read</a>.</p>
     </details>
 
     <h2 id="privacy">Privacy</h2>
 
     <details id="data">
       <summary>Does Heft send any data anywhere?</summary>
-      <p>No. Heft has no accounts, analytics or crash reporting. The only time it uses the network is when you check for or install software updates on the Programs page, which runs winget. This website has no analytics or cookies either.</p>
+      <p>No. Heft has no accounts, analytics or crash reporting. The only time it uses the network is when you check for or install software updates: on the Programs page on Windows, which runs winget, or on the Apps page on a Mac, which runs Homebrew and, if it's installed, <code>mas</code> for App Store apps. On a Mac you can also let Heft ask the update servers of apps that update themselves (Settings › Checking for updates); that's off unless you turn it on. This website has no analytics or cookies either.</p>
     </details>
 
     <details id="stored">
@@ -172,19 +192,21 @@
       <ul>
         <li>Scan snapshots for the Changes tab, the list of items it moved to the Recycle Bin or Trash, and your Cleaner selection, in <code>%LOCALAPPDATA%\Heft</code> (Windows), <code>~/Library/Application Support/Heft</code> (macOS) or <code>~/.local/share/heft</code> (Linux).</li>
         <li>Registry backups in <code>%LOCALAPPDATA%\Heft\backups</code> (Windows).</li>
+        <li>Backups of the launch agents, login items and other entries Heft changed, in <code>~/Library/Application Support/Heft/backups</code>, and the login items you turned off, in <code>login-items-off.plist</code> in the folder above it (macOS).</li>
         <li>The window size and a few view settings, in <code>%APPDATA%\heft</code> (Windows), <code>~/Library/Application Support/heft</code> (macOS) or <code>~/.local/share/heft</code> (Linux).</li>
       </ul>
       <p>Snapshots record folder sizes and the names of files over 16 MB, not file contents.</p>
+      <p>Start with Windows adds a <code>Heft</code> value under <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>, and weekly cleaning adds a scheduled task called <code>Heft\Weekly clean</code>. On a Mac, Start at login adds <code>~/Library/LaunchAgents/io.github.gjnail.heft.plist</code>, and weekly cleaning adds <code>io.github.gjnail.heft.weekly-clean.plist</code> next to it; macOS shows a "Background Items Added" notice for each. Turning any of them off removes it.</p>
     </details>
 
     <h2 id="other">Everything else</h2>
 
     <details id="uninstall">
       <summary>How do I uninstall Heft?</summary>
-      <p>If you turned on Start with Windows (View menu) or weekly cleaning (Cleaner page), turn them off first. Then delete the program and its data folders:</p>
+      <p>If you turned on Start with Windows or Start at login (View menu) or weekly cleaning (Cleaner page), turn them off first. On a Mac, that removes their launch agents. Then delete the program and its data folders:</p>
       <ul>
         <li><strong>Windows:</strong> <code>heft.exe</code>, <code>%LOCALAPPDATA%\Heft</code> and <code>%APPDATA%\heft</code>. Keep a copy of <code>%LOCALAPPDATA%\Heft\backups</code> if you might want to undo a registry fix later.</li>
-        <li><strong>macOS:</strong> move Heft to the Trash and delete <code>~/Library/Application Support/Heft</code>.</li>
+        <li><strong>macOS:</strong> move Heft to the Trash and delete <code>~/Library/Application Support/Heft</code>. Keep a copy of its <code>backups</code> folder if you might want to undo a change to a launch agent, login item or other entry later.</li>
         <li><strong>Linux:</strong> delete the <code>heft</code> program and <code>~/.local/share/heft</code>. If you used <code>install-linux.sh</code>, the top of that script lists the files it added.</li>
       </ul>
     </details>
@@ -196,7 +218,7 @@
 
     <details id="bugs">
       <summary>How do I report a bug or ask for a feature?</summary>
-      <p><a href="https://github.com/gjnail/heft/issues">Open an issue on GitHub</a>. Reports from macOS and Linux are especially welcome, since those builds haven't been tried on much real hardware yet. Pull requests are welcome too; see the <a href="https://github.com/gjnail/heft/blob/main/CONTRIBUTING.md">contributing guide</a>.</p>
+      <p><a href="https://github.com/gjnail/heft/issues">Open an issue on GitHub</a>. Reports from Macs and Linux are especially welcome: the Mac build has been tested on an Apple silicon Mac but not yet on Intel Macs, and the Linux build hasn't been tried on real hardware yet. Pull requests are welcome too; see the <a href="https://github.com/gjnail/heft/blob/main/CONTRIBUTING.md">contributing guide</a>.</p>
     </details>
 
     <div class="pager">

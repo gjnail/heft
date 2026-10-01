@@ -11,10 +11,14 @@
 //! - Cleaning deletes the files found by the analysis, not whatever happens
 //!   to be in the folder later.
 //! - System-owned files on macOS and Linux are left to the tool that owns
-//!   them (apt, journalctl, snap, …); Heft only runs it.
+//!   them (apt, journalctl, snap, …); Heft only runs it. Where there is no
+//!   such tool (macOS's system logs), root deletes exactly the files the
+//!   analysis listed, and never a folder.
 //!
-//! Everything OS-specific lives in `windows.rs` / `unix.rs`.
+//! Everything OS-specific lives in `windows.rs` / `unix.rs` (and `mac.rs`).
 
+#[cfg(target_os = "macos")]
+mod mac;
 #[cfg(any(unix, test))]
 mod parse;
 pub mod rules;
@@ -40,8 +44,10 @@ use std::time::SystemTime;
 
 use rayon::prelude::*;
 
-pub use os::{running_processes, Special, SYSTEM};
-#[cfg(windows)]
+pub use os::{Special, SYSTEM};
+#[cfg(target_os = "macos")]
+pub use mac::{follow_move, has_full_disk_access, local_snapshots, THIN_SNAPSHOTS};
+#[cfg(any(windows, target_os = "macos"))]
 pub use os::{schedule_enabled, set_schedule};
 use rules::{Rule, Target};
 
@@ -103,9 +109,28 @@ pub struct Progress {
 pub struct Env {
     pub running: HashSet<String>,
     pub elevated: bool,
-    /// Admin-only rules can ask for a password themselves (Linux `pkexec`).
+    /// Admin-only rules can ask for a password themselves (Linux `pkexec`,
+    /// macOS's administrator prompt).
     pub can_elevate: bool,
+    /// A scheduled run with nobody watching: rules that would restart an app
+    /// you can see (Finder) wait for a run you start yourself.
+    pub unattended: bool,
     pub now: SystemTime,
+}
+
+/// Admin-only rules ask for the password when cleaning, rather than needing
+/// Heft itself to run as administrator.
+pub fn asks_password() -> bool {
+    os::can_elevate_tools()
+}
+
+/// The first program in `close` that is running. Names may contain `*`,
+/// because some programs carry their version in their name ("Adobe
+/// Premiere Pro 2025").
+fn running_one(close: &[&'static str], running: &HashSet<String>) -> Option<&'static str> {
+    close.iter().copied().find(|exe| {
+        if exe.contains('*') { running.iter().any(|r| wildcard(exe, r)) } else { running.contains(*exe) }
+    })
 }
 
 impl Env {
@@ -114,6 +139,7 @@ impl Env {
             running: os::running_processes(),
             elevated: crate::platform::is_elevated(),
             can_elevate: os::can_elevate_tools(),
+            unattended: false,
             now: SystemTime::now(),
         }
     }
@@ -122,8 +148,15 @@ impl Env {
 // ----------------------------------------------------------------------
 // Resolving locations
 
-/// Replace `%VAR%` placeholders. `None` if any of them is unknown.
+/// Replace `%VAR%` placeholders. `None` if any of them is unknown or the
+/// result isn't a safe location.
 pub fn resolve(template: &str) -> Option<PathBuf> {
+    expand(template).filter(|p| safe_location(p))
+}
+
+/// Replace `%VAR%` placeholders, without the safety check. Only for a
+/// folder that is listed, never cleaned itself (`EachDir`'s root).
+fn expand(template: &str) -> Option<PathBuf> {
     let mut out = String::with_capacity(template.len() + 64);
     let mut rest = template;
     while let Some(start) = rest.find('%') {
@@ -134,8 +167,7 @@ pub fn resolve(template: &str) -> Option<PathBuf> {
         rest = &after[end + 1..];
     }
     out.push_str(rest);
-    let p = PathBuf::from(out);
-    safe_location(&p).then_some(p)
+    Some(PathBuf::from(out)).filter(|p| p.is_absolute())
 }
 
 /// Defence in depth against a bad rule or odd environment: the location must
@@ -252,8 +284,9 @@ fn scan_dir(dir: &Path, own: Option<SystemTime>, cutoff: Option<SystemTime>, roo
             out.pinned = true;
             continue;
         };
-        if os::is_link(&md) {
-            // Links are never followed or deleted.
+        if os::is_link(&md) || !(md.is_dir() || md.is_file()) {
+            // Links are never followed or deleted, and neither are sockets
+            // and pipes a running program may be listening on.
             out.pinned = true;
         } else if md.is_dir() {
             subdirs.push((e.path(), touched(&md)));
@@ -309,7 +342,7 @@ impl Collector {
             if remove_self && !s.active && !s.pinned {
                 self.dirs.push(path.to_path_buf());
             }
-        } else if self.cutoff.is_none_or(|c| touched(&md).is_some_and(|t| t <= c)) {
+        } else if md.is_file() && self.cutoff.is_none_or(|c| touched(&md).is_some_and(|t| t <= c)) {
             self.files.push((path.to_path_buf(), md.len()));
         }
     }
@@ -320,7 +353,7 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
     let rule = &rules::all()[rule_index];
     let mut found = Found { rule: rule_index, ..Default::default() };
     found.needs_admin = rule.admin && !env.elevated && !env.can_elevate;
-    found.blocked_by = rule.close.iter().copied().find(|exe| env.running.contains(*exe));
+    found.blocked_by = running_one(rule.close, &env.running);
 
     let mut c = Collector::new(None);
     for t in rule.targets {
@@ -356,9 +389,14 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
                 }
             }
             Target::EachDir(root, sub) => {
-                if let Some(root) = resolve(root) {
+                // The root may be a protected folder (your cache folder); what's
+                // cleaned is inside its subfolders, and each of those is checked.
+                if let Some(root) = expand(root) {
                     for d in subdirs(&root) {
-                        c.add(&d.join(sub), false, cancel);
+                        let p = d.join(sub);
+                        if safe_location(&p) {
+                            c.add(&p, false, cancel);
+                        }
                     }
                 }
             }
@@ -377,6 +415,9 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
     c.dirs.dedup();
     c.dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
 
+    if env.unattended && found.blocked_by.is_none() {
+        found.blocked_by = found.special.restarts_app();
+    }
     found.bytes = c.files.iter().map(|f| f.1).sum::<u64>() + found.special.bytes();
     found.items = c.files.len() as u64 + found.special.items();
     found.files = c.files;
@@ -386,14 +427,19 @@ pub fn analyze(rule_index: usize, env: &Env, cancel: &AtomicBool) -> Found {
 
 /// Analyze several rules in parallel, sending each result as it's ready.
 pub fn analyze_all(rules: Vec<usize>, tx: crossbeam_channel::Sender<Found>, p: &Progress) {
-    let env = Env::current();
+    analyze_with(rules, &Env::current(), tx, p);
+}
+
+/// `analyze_all` with facts the caller adjusted (`heft --clean` run by a
+/// schedule can't ask for a password).
+pub fn analyze_with(rules: Vec<usize>, env: &Env, tx: crossbeam_channel::Sender<Found>, p: &Progress) {
     p.total.store(rules.len() as u64, Ordering::Relaxed);
     p.done.store(0, Ordering::Relaxed);
     rules.into_par_iter().for_each(|r| {
         if p.cancel.load(Ordering::Relaxed) {
             return;
         }
-        let found = analyze(r, &env, &p.cancel);
+        let found = analyze(r, env, &p.cancel);
         p.done.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(found);
     });
@@ -402,11 +448,44 @@ pub fn analyze_all(rules: Vec<usize>, tx: crossbeam_channel::Sender<Found>, p: &
 // ----------------------------------------------------------------------
 // Cleaning
 
-/// Delete what `found` lists. Re-checks running programs first.
-pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned {
+/// What's in use when cleaning starts.
+struct Busy {
+    running: HashSet<String>,
+    /// Open files as (device, inode). Windows refuses to delete those by
+    /// itself, so this is only filled on macOS and Linux.
+    open: HashSet<(u64, u64)>,
+}
+
+/// Delete what each of `jobs` lists. Re-checks running programs and open
+/// files first. Whatever needs the administrator password is gathered from
+/// every rule and done at the end, under one password prompt.
+pub fn clean_all(jobs: &[Found], p: &Progress) -> Vec<Cleaned> {
+    if jobs.is_empty() {
+        return Vec::new();
+    }
+    let busy = Busy { running: os::running_processes(), open: os::open_files() };
+    let mut root = os::Elevated::default();
+    let mut out = Vec::with_capacity(jobs.len());
+    for f in jobs {
+        if p.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let c = clean_rule(f, out.len(), &busy, p, &mut root);
+        out.push(c);
+    }
+    if !root.is_empty() && !p.cancel.load(Ordering::Relaxed) {
+        *p.current.lock().unwrap() = "Waiting for the administrator password…".into();
+        root.run(&mut out);
+    }
+    out
+}
+
+/// Clean one rule. `result` is its place in the results, for the work it
+/// leaves to `root`.
+fn clean_rule(found: &Found, result: usize, busy: &Busy, p: &Progress, root: &mut os::Elevated) -> Cleaned {
     let rule = found.rule();
     let mut out = Cleaned { rule: found.rule, ..Default::default() };
-    if let Some(exe) = rule.close.iter().find(|exe| running.contains(**exe)) {
+    if let Some(exe) = running_one(rule.close, &busy.running) {
         out.note = Some(format!("skipped: {exe} is running"));
         return out;
     }
@@ -419,33 +498,49 @@ pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned 
     let removed = AtomicU64::new(0);
     let freed = AtomicU64::new(0);
     let skipped = AtomicU64::new(0);
+    // Files in system folders only root may delete (admin rules only).
+    let denied = Mutex::new(Vec::new());
     found.files.par_iter().for_each(|(path, size)| {
         if p.cancel.load(Ordering::Relaxed) {
             return;
         }
-        match os::remove_file(path) {
-            Ok(()) => {
-                removed.fetch_add(1, Ordering::Relaxed);
-                freed.fetch_add(*size, Ordering::Relaxed);
-                p.freed.fetch_add(*size, Ordering::Relaxed);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => {
-                skipped.fetch_add(1, Ordering::Relaxed);
+        if !busy.open.is_empty() && os::file_id(path).is_some_and(|id| busy.open.contains(&id)) {
+            skipped.fetch_add(1, Ordering::Relaxed);
+        } else {
+            match os::remove_file(path) {
+                Ok(()) => {
+                    removed.fetch_add(1, Ordering::Relaxed);
+                    freed.fetch_add(*size, Ordering::Relaxed);
+                    p.freed.fetch_add(*size, Ordering::Relaxed);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) if rule.admin && e.kind() == std::io::ErrorKind::PermissionDenied && os::root_may_remove(path) => {
+                    denied.lock().unwrap().push((path.clone(), *size));
+                }
+                Err(_) => {
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
         p.done.fetch_add(1, Ordering::Relaxed);
     });
-    // Deepest first; folders that still hold skipped files stay.
-    for d in &found.dirs {
-        let _ = std::fs::remove_dir(d);
+    // Deepest first; folders that still hold skipped files stay. Folders in
+    // system locations always stay: a service may need its log folder.
+    if !rule.admin {
+        for d in &found.dirs {
+            let _ = std::fs::remove_dir(d);
+        }
     }
     out.removed = removed.into_inner();
     out.freed = freed.into_inner();
     out.skipped = skipped.into_inner();
+    let denied = denied.into_inner().unwrap();
+    if !denied.is_empty() {
+        root.add_files(result, rule.name, denied);
+    }
 
     if !p.cancel.load(Ordering::Relaxed) {
-        let sp = os::clean_special(&found.special);
+        let sp = os::clean_special(&found.special, out.removed > 0, result, rule.name, root);
         out.freed += sp.freed;
         out.removed += sp.removed;
         out.skipped += sp.skipped;
@@ -460,7 +555,11 @@ pub fn clean(found: &Found, running: &HashSet<String>, p: &Progress) -> Cleaned 
 // Saved selection (shared by the GUI and `heft --clean`)
 
 fn selection_file() -> PathBuf {
-    crate::platform::data_dir().join("cleaner.txt")
+    // HEFT_DATA_DIR keeps test runs away from the real selection.
+    match std::env::var_os("HEFT_DATA_DIR").filter(|v| !v.is_empty()) {
+        Some(dir) => PathBuf::from(dir).join("cleaner.txt"),
+        None => crate::platform::data_dir().join("cleaner.txt"),
+    }
 }
 
 /// Rule indices that are ticked: the defaults, adjusted by the saved file.
@@ -559,6 +658,111 @@ mod tests {
         assert!(!safe_location(Path::new("relative/path/here")));
         assert!(!safe_location(Path::new("/home/x/../../etc")));
         assert!(safe_location(Path::new("/var/cache/apt/archives")));
+        if cfg!(target_os = "macos") {
+            // Your temp folder's contents may go; your cache folder as a whole may not.
+            assert!(resolve("%TEMP%").is_some());
+            assert!(resolve("%DARWIN_CACHE%").is_none());
+            assert!(resolve("%DARWIN_CACHE%/com.apple.metal").is_some());
+            assert!(resolve("%LIBRARY%").is_none());
+            assert!(resolve("%LIBRARY%/Logs").is_some());
+            assert!(!safe_location(Path::new("/private/var/folders")));
+        }
+    }
+
+    /// Every location in the catalog resolves, to somewhere safe: catches
+    /// misspelled `%VAR%` names and rules that would point at a top folder.
+    #[cfg(unix)]
+    #[test]
+    fn every_location_resolves() {
+        for r in rules::all() {
+            for t in r.targets {
+                let ok = match t {
+                    Target::Path(p) | Target::Older(p, _) | Target::Glob(p, _) | Target::Chromium(p, _) => resolve(p).is_some(),
+                    Target::EachDir(p, sub) => expand(p).is_some_and(|root| safe_location(&root.join("x").join(sub))),
+                    _ => continue,
+                };
+                assert!(ok, "{}: {t:?} doesn't resolve to a safe folder", r.id);
+            }
+        }
+        // EachDir's root may be protected, but nothing directly in it is cleaned.
+        if cfg!(target_os = "macos") {
+            assert!(!safe_location(&expand("%DARWIN_CACHE%").unwrap()));
+            assert!(safe_location(&expand("%DARWIN_CACHE%/com.app/com.apple.metal").unwrap()));
+        }
+    }
+
+    /// A scheduled run never restarts Finder under you. (Analysis only reads
+    /// Finder's preferences.)
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unattended_runs_leave_finder_alone() {
+        let cancel = AtomicBool::new(false);
+        let finder = rules::by_id("priv.finder").unwrap();
+        let mut env = Env::current();
+        assert_eq!(analyze(finder, &env, &cancel).blocked_by, None);
+        env.unattended = true;
+        assert_eq!(analyze(finder, &env, &cancel).blocked_by, Some("finder"));
+        // Restarting the background agent behind Recent items is fine.
+        assert_eq!(analyze(rules::by_id("priv.recent").unwrap(), &env, &cancel).blocked_by, None);
+    }
+
+    #[test]
+    fn close_names_with_wildcards() {
+        let running: HashSet<String> = ["adobe premiere pro 2026".to_string(), "finder".to_string()].into();
+        assert_eq!(running_one(&["after effects", "adobe premiere pro*"], &running), Some("adobe premiere pro*"));
+        assert_eq!(running_one(&["finder"], &running), Some("finder"));
+        assert_eq!(running_one(&["adobe media encoder*", "safari"], &running), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sockets_are_never_listed() {
+        let d = temp_dir("socket");
+        std::fs::write(d.join("old.tmp"), b"x").unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(d.join("app.sock")).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut c = Collector::new(None);
+        c.add(&d, false, &cancel);
+        let names: Vec<_> = c.files.iter().map(|f| f.0.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["old.tmp"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn open_files_are_skipped() {
+        let d = temp_dir("inuse");
+        let (held, free) = (d.join("held.tmp"), d.join("free.tmp"));
+        std::fs::write(&free, b"1").unwrap();
+        let f = std::fs::File::create(&held).unwrap();
+        let files = vec![(held.clone(), 0), (free.clone(), 1)];
+        let found = Found { rule: 0, files, bytes: 1, items: 2, ..Default::default() };
+        let r = clean_all(&[found], &Progress::default()).remove(0);
+        assert_eq!((r.removed, r.skipped), (1, 1));
+        assert!(held.exists() && !free.exists());
+        drop(f);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn system_rules_keep_their_folders() {
+        // Any rule that needs administrator rights, with nothing to close first.
+        let admin = rules::all().iter().position(|r| r.admin && r.close.is_empty()).unwrap();
+        let d = temp_dir("admin");
+        std::fs::create_dir_all(d.join("service")).unwrap();
+        std::fs::write(d.join("service/old.log"), b"12").unwrap();
+        let found = Found {
+            rule: admin,
+            files: vec![(d.join("service/old.log"), 2)],
+            dirs: vec![d.join("service")],
+            bytes: 2,
+            items: 1,
+            ..Default::default()
+        };
+        let r = clean_all(&[found], &Progress::default()).remove(0);
+        assert_eq!(r.removed, 1);
+        assert!(d.join("service").is_dir(), "the folder stays");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -609,7 +813,7 @@ mod tests {
         dirs.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
         let found = Found { rule: 0, files: c.files, dirs, bytes: 1025, items: 3, ..Default::default() };
         let p = Progress::default();
-        let r = clean(&found, &HashSet::new(), &p);
+        let r = clean_all(&[found], &p).remove(0);
         assert_eq!(r.removed, 3);
         assert_eq!(r.freed, 1025);
         assert!(d.exists());

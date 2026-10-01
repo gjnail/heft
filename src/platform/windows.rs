@@ -49,7 +49,7 @@ pub fn list_drives() -> Vec<DriveInfo> {
         if total == 0 && kind == "Optical" {
             continue; // empty drive
         }
-        out.push(DriveInfo { root, label, fs: fsname, kind, total, free });
+        out.push(DriveInfo { root, label, fs: fsname, kind, total, free, purgeable: 0 });
     }
     out
 }

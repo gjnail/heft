@@ -49,7 +49,7 @@ struct Job {
     started: Instant,
     path: String,
     moved_to: String,
-    /// Ok(None) when the original went to the Recycle Bin, Ok(Some(path))
+    /// Ok(None) when the original went to the Recycle Bin or Trash, Ok(Some(path))
     /// when it couldn't and is still at that path.
     rx: Receiver<Result<Option<String>, String>>,
 }
@@ -241,9 +241,10 @@ impl HeftApp {
         let (p2, ctx, src, parent) = (p.clone(), ctx.clone(), path.clone(), dest.clone());
         std::thread::spawn(move || {
             let r = relocate::relocate(Path::new(&src), Path::new(&parent), &p2).map(|old| {
-                *p2.phase.lock().unwrap() = "Moving the original to the Recycle Bin";
-                match trash::delete(&old) {
-                    Ok(()) => None,
+                *p2.phase.lock().unwrap() =
+                    if cfg!(windows) { "Moving the original to the Recycle Bin" } else { "Moving the original to the Trash" };
+                match platform::move_to_trash(&old) {
+                    Ok(_) => None,
                     Err(_) => Some(old.to_string_lossy().into_owned()),
                 }
             });

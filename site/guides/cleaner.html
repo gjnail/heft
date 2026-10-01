@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Cleaner · Heft</title>
-  <meta name="description" content="How Heft's Cleaner removes caches and temporary files safely on Windows, macOS and Linux, including weekly cleaning and compacting WSL and Docker disks.">
+  <meta name="description" content="How Heft's Cleaner removes caches and temporary files safely on Windows, macOS and Linux, including weekly cleaning, the administrator password on a Mac, and compacting WSL and Docker disks.">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="../images/favicon-32.png" type="image/png">
   <link rel="stylesheet" href="../assets/style.css">
@@ -39,6 +39,7 @@
       <li><a href="cleaner.html" aria-current="page">The Cleaner</a></li>
       <li><a href="hardware.html">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -57,9 +58,10 @@
         <li><a href="#covered">What it covers</a></li>
         <li><a href="#rules">How it stays safe</a></li>
         <li><a href="#system-tools">System caches on Linux</a></li>
-        <li><a href="#weekly">Weekly cleaning (Windows)</a></li>
+        <li><a href="#weekly">Weekly cleaning (Windows and macOS)</a></li>
         <li><a href="#wsl">WSL and Docker disks (Windows)</a></li>
         <li><a href="#windows-tools">Windows' own tools</a></li>
+        <li><a href="#mac-tools">macOS's own tools</a></li>
       </ul>
     </nav>
 
@@ -71,13 +73,13 @@
     <ol>
       <li>Open the <strong>Cleaner</strong> page. Heft analyzes right away; this only reads, and takes a few seconds.</li>
       <li>Look over <strong>What to clean</strong> on the left. Each item shows how much it would free. <strong>Recommended</strong> ticks Heft's defaults (caches and temporary files only), and <strong>None</strong> clears everything.</li>
-      <li>Click a row in the results to see exactly which files would be removed. Double-click a file to show it in Explorer. <strong>Back to all results</strong> returns to the list.</li>
+      <li>Click a row in the results to see exactly which files would be removed. Double-click a file to show it in Explorer (Finder on a Mac). <strong>Back to all results</strong> returns to the list.</li>
       <li>Press <strong>Clean</strong> and confirm.</li>
     </ol>
     <p>Some items are marked in the list:</p>
     <ul>
       <li><strong>⏸ Close the program first.</strong> Heft skips a program's caches while it's running, so it never pulls files out from under it. Close it and press <strong>Analyze</strong> again.</li>
-      <li><strong>🛡 Needs administrator rights.</strong> System-wide locations such as Windows Update downloads and memory dumps need <strong>Restart as administrator</strong>.</li>
+      <li><strong>🛡 Needs administrator rights.</strong> On Windows, system-wide locations such as Windows Update downloads and memory dumps need <strong>Restart as administrator</strong>. On a Mac, the items marked 🛡 (system logs and the DNS cache) ask for your administrator password instead: Heft does everything else first, then macOS asks once, at the end of the clean.</li>
       <li><strong>⚠ Has a side effect.</strong> Hover to see it. Cookies sign you out of every website, emptying the Recycle Bin is permanent, and developer caches download again on the next build. Apart from memory dumps, which only matter if you're troubleshooting crashes, none of these are ticked by default.</li>
     </ul>
     <p>Your selection is remembered for next time. Programs that aren't installed are hidden, so the list only shows what's on your computer.</p>
@@ -90,11 +92,11 @@
       <table>
         <thead><tr><th>Group</th><th>Examples</th></tr></thead>
         <tbody>
-          <tr><td>System</td><td>Temporary files, the Recycle Bin or Trash, thumbnail and shader caches, error reports and crash dumps, old logs. On Windows also Windows Update and Delivery Optimization downloads, setup logs and NVIDIA driver downloads.</td></tr>
-          <tr><td>Browsers</td><td>Chrome, Edge, Firefox, Brave, Vivaldi, Opera and Chromium, plus Opera GX on Windows and Safari on macOS. The cache is ticked by default. On Windows, cookies, history, form history and the last session are there too, each with a note on what you'd lose.</td></tr>
-          <tr><td>Applications</td><td>Discord, Slack, Teams, Spotify, Visual Studio Code, Cursor, Steam, Epic Games Launcher, JetBrains IDEs, Adobe and Java.</td></tr>
-          <tr><td>Developer tools</td><td>Package and build caches for npm, Yarn, Bun, pip, Cargo, Go, Gradle, NuGet, Deno, Composer and Electron. On macOS also Homebrew, Xcode (DerivedData, simulator caches, simulators for runtimes you no longer have, device support files) and CocoaPods.</td></tr>
-          <tr><td>Privacy (Windows)</td><td>Recent items, Run dialog and Explorer address bar history, the clipboard and the DNS cache. None are ticked by default.</td></tr>
+          <tr><td>System</td><td>Temporary files, the Recycle Bin or Trash, thumbnail and shader caches, error reports and crash dumps, old logs. On Windows also Windows Update and Delivery Optimization downloads, setup logs and NVIDIA driver downloads. On macOS also Quick Look thumbnails, Metal shader caches, iPhone and iPad software updates, and system logs in <code>/Library/Logs</code>.</td></tr>
+          <tr><td>Browsers</td><td>Chrome, Edge, Firefox, Brave, Vivaldi, Opera, Opera GX and Chromium, plus Safari on macOS. The cache is ticked by default. Cookies, history, form history and the last session are there too, each with a note on what you'd lose. Safari's cookies, history and last session are only listed when Heft has Full Disk Access.</td></tr>
+          <tr><td>Applications</td><td>Discord, Slack, Teams, Spotify, Visual Studio Code, Cursor, Steam, Epic Games Launcher, JetBrains IDEs, Adobe and Java. On a Mac, new Teams' cache is only listed when Heft has Full Disk Access.</td></tr>
+          <tr><td>Developer tools</td><td>Package and build caches for npm, Yarn, Bun, pip, Cargo, Go, Gradle, NuGet, Deno, Composer and Electron. On macOS also Homebrew, Xcode (DerivedData, simulator caches, simulators for runtimes you no longer have, device support files), CocoaPods, and Docker's build cache and dangling images.</td></tr>
+          <tr><td>Privacy</td><td>Recent items, the clipboard and the DNS cache. On Windows also Run dialog and Explorer address bar history, and on macOS Finder's recent folders and Go to Folder history. None are ticked by default.</td></tr>
         </tbody>
       </table>
     </div>
@@ -107,6 +109,7 @@
       <li>Links and junctions are never followed, so a cache folder can't lead Heft somewhere else.</li>
       <li>Files that are in use are skipped, never forced.</li>
       <li>Cleaning removes the files the analysis found, not whatever turns up in the folder later.</li>
+      <li>On a Mac, system files are only ever deleted from the exact list Heft showed you, never as whole folders.</li>
     </ul>
 
     <h2 id="system-tools">System caches on Linux</h2>
@@ -117,11 +120,15 @@
       <li>removing old, disabled snap revisions;</li>
       <li><code>flatpak uninstall --unused</code> for runtimes no app needs.</li>
     </ul>
-    <p>Heft shows the estimated saving first. Commands that need root go through <code>pkexec</code>, which asks for your password with your desktop's own prompt. On macOS, the Xcode simulator cleanup runs <code>xcrun simctl delete unavailable</code> in the same spirit.</p>
+    <p>Heft shows the estimated saving first. Commands that need root go through <code>pkexec</code>, which asks for your password with your desktop's own prompt, once per clean. On macOS, the Xcode simulator cleanup runs <code>xcrun simctl delete unavailable</code> in the same spirit.</p>
 
-    <h2 id="weekly">Weekly cleaning (Windows)</h2>
-    <p>At the bottom of the Cleaner page, tick <strong>Clean the selected items every Sunday</strong>. Heft adds a Windows scheduled task called <code>Heft\Weekly clean</code> that runs <code>heft --clean</code> with your current selection. If you set it up while running as administrator, the task runs elevated too, so administrator-only items are included.</p>
-    <p>Untick the box to remove the task. On macOS and Linux, you can schedule <code>heft --clean</code> yourself; see <a href="command-line.html#schedule">Command line</a>.</p>
+    <h2 id="weekly">Weekly cleaning (Windows and macOS)</h2>
+    <p>At the bottom of the Cleaner page, tick <strong>Clean the selected items every Sunday</strong>. Heft then runs <code>heft --clean</code> with your current selection at noon every Sunday.</p>
+    <ul>
+      <li><strong>On Windows,</strong> this adds a scheduled task called <code>Heft\Weekly clean</code>. If you set it up while running as administrator, the task runs elevated too, so administrator-only items are included.</li>
+      <li><strong>On a Mac,</strong> this adds a launch agent, <code>io.github.gjnail.heft.weekly-clean</code>, in <code>~/Library/LaunchAgents</code>. macOS shows a "Background Items Added" notice and lists it in System Settings › General › Login Items &amp; Extensions. Nobody is there to type a password, so the weekly clean skips items that need your administrator password, and anything that would restart Finder.</li>
+    </ul>
+    <p>Untick the box to remove it. On Linux, you can schedule <code>heft --clean</code> yourself; see <a href="command-line.html#schedule">Command line</a>.</p>
 
     <h2 id="wsl">WSL and Docker disks (Windows)</h2>
     <p>WSL 2 distros and Docker Desktop keep Linux's files in a virtual disk (<code>.vhdx</code>) that grows as Linux writes data but never shrinks when the data is deleted. The <strong>WSL and Docker disks</strong> section finds them and shows their size.</p>
@@ -139,6 +146,15 @@
       <li><strong>Disk Cleanup</strong>, which can remove a previous Windows installation (<code>Windows.old</code>);</li>
       <li><strong>Component store cleanup</strong>, which runs DISM as administrator to remove superseded Windows updates from WinSxS. It opens a console window and can take a while.</li>
     </ul>
+
+    <h2 id="mac-tools">macOS's own tools</h2>
+    <p>On a Mac, the Cleaner page has shortcuts to:</p>
+    <ul>
+      <li><strong>Storage settings</strong>, System Settings › General › Storage, which shows what uses the space and offers recommendations such as emptying the Trash automatically;</li>
+      <li><strong>Thin Time Machine snapshots</strong>, when Time Machine is keeping local snapshots on the disk. macOS removes them by itself when space runs low; this asks it to do so now, in a Terminal window. Backups on your Time Machine disk aren't touched.</li>
+    </ul>
+    <p>Without Full Disk Access, Heft can't see inside the Trash, Safari's cache or Recent items, and it doesn't list Safari's cookies, history and last session or new Teams' cache, which macOS keeps in protected places. The page says so and has a button to open System Settings › Privacy &amp; Security, where you can allow it. Quit and reopen Heft afterwards.</p>
+    <p>Safari's history comes back if Safari syncs through iCloud: your other devices send it back. To clear it everywhere, use History › Clear History in Safari.</p>
 
     <div class="pager">
       <a href="duplicates.html"><small>Previous</small>Duplicates and saving space</a>

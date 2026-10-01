@@ -1,20 +1,23 @@
 //! Application state and top-level layout.
 
-#[cfg(any(windows, target_os = "linux"))]
 mod hardware;
 mod screens;
 mod alerts_view;
 mod compress_view;
+#[cfg(target_os = "macos")]
+mod icloud_view;
 #[cfg(debug_assertions)]
 mod debug_shot;
 mod live;
 mod relocate_view;
 mod removed_view;
 mod search_view;
+mod settings_view;
 mod share_view;
 mod suggest_view;
 mod trend_view;
 mod tabs;
+mod theme_toggle;
 mod tools;
 mod tree_view;
 mod treemap_view;
@@ -48,21 +51,23 @@ pub enum Tab {
     Removed,
 }
 
-/// The top-level pages. Disk usage and the cleaner everywhere; startup,
-/// programs and registry tools are Windows-only.
+/// The top-level pages. Disk usage, hardware and the cleaner everywhere;
+/// startup and programs on Windows and macOS; the registry check on Windows
+/// and its macOS counterpart, broken items.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Workspace {
     Disk,
-    /// Sensors: Windows and Linux (macOS has no backend yet).
-    #[cfg(any(windows, target_os = "linux"))]
     Hardware,
     Cleaner,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     Startup,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     Programs,
     #[cfg(windows)]
     Registry,
+    /// Launch agents, login items and links left pointing at deleted apps.
+    #[cfg(target_os = "macos")]
+    Broken,
 }
 
 impl Workspace {
@@ -75,23 +80,35 @@ impl Workspace {
         Workspace::Programs,
         Workspace::Registry,
     ];
-    #[cfg(target_os = "linux")]
+    #[cfg(target_os = "macos")]
+    const ALL: [Workspace; 6] = [
+        Workspace::Disk,
+        Workspace::Hardware,
+        Workspace::Cleaner,
+        Workspace::Startup,
+        Workspace::Programs,
+        Workspace::Broken,
+    ];
+    #[cfg(not(any(windows, target_os = "macos")))]
     const ALL: [Workspace; 3] = [Workspace::Disk, Workspace::Hardware, Workspace::Cleaner];
-    #[cfg(not(any(windows, target_os = "linux")))]
-    const ALL: [Workspace; 2] = [Workspace::Disk, Workspace::Cleaner];
 
     fn label(self) -> &'static str {
         match self {
             Workspace::Disk => "Disk usage",
-            #[cfg(any(windows, target_os = "linux"))]
             Workspace::Hardware => "Hardware",
             Workspace::Cleaner => "Cleaner",
             #[cfg(windows)]
             Workspace::Startup => "Startup",
+            #[cfg(target_os = "macos")]
+            Workspace::Startup => "Login items",
             #[cfg(windows)]
             Workspace::Programs => "Programs",
+            #[cfg(target_os = "macos")]
+            Workspace::Programs => "Apps",
             #[cfg(windows)]
             Workspace::Registry => "Registry",
+            #[cfg(target_os = "macos")]
+            Workspace::Broken => "Broken items",
         }
     }
 
@@ -99,15 +116,16 @@ impl Workspace {
     fn key(self) -> &'static str {
         match self {
             Workspace::Disk => "disk",
-            #[cfg(any(windows, target_os = "linux"))]
             Workspace::Hardware => "hardware",
             Workspace::Cleaner => "cleaner",
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             Workspace::Startup => "startup",
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             Workspace::Programs => "programs",
             #[cfg(windows)]
             Workspace::Registry => "registry",
+            #[cfg(target_os = "macos")]
+            Workspace::Broken => "broken",
         }
     }
 
@@ -142,6 +160,9 @@ pub enum Action {
     CopyPath(NodeId),
     Delete(Vec<NodeId>),
     Compress(Vec<NodeId>),
+    /// Remove the downloaded copies of iCloud Drive files (macOS).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    RemoveDownload(Vec<NodeId>),
     Relocate(NodeId),
     ScanPath(String),
     Rescan,
@@ -170,8 +191,11 @@ struct DupState {
     searched: bool,
 }
 
+/// Each item, its path, and where it landed in the trash (or why it didn't).
+type Deleted = Vec<(NodeId, String, Result<crate::trashlog::Landed, String>)>;
+
 struct DeleteJob {
-    rx: Receiver<Vec<(NodeId, String, Result<(), String>)>>,
+    rx: Receiver<Deleted>,
 }
 
 /// Folders we didn't look inside (virtual mounts, a second path to a folder
@@ -179,6 +203,19 @@ struct DeleteJob {
 /// the user never saw.
 fn deletable(tree: &Tree, id: NodeId) -> bool {
     tree.node(id).flags & (crate::tree::flags::MOUNT | crate::tree::flags::SEEN) == 0
+}
+
+/// Purgeable space below this isn't mentioned.
+const PURGEABLE_WORTH_SHOWING: u64 = 1 << 30;
+
+/// Why Finder shows more free space than Heft.
+fn purgeable_hint(purgeable: u64) -> String {
+    format!(
+        "macOS can free {} more by itself when something needs the room: local Time Machine snapshots, \
+         iCloud files that are also in iCloud, and caches. Finder counts that as available; Heft shows \
+         what's free right now.",
+        fmt_size(purgeable)
+    )
 }
 
 #[cfg(windows)]
@@ -230,7 +267,6 @@ pub struct HeftApp {
 
     workspace: Workspace,
     tools: tools::Tools,
-    #[cfg(any(windows, target_os = "linux"))]
     hardware: hardware::Hardware,
 
     tab: Tab,
@@ -242,6 +278,8 @@ pub struct HeftApp {
     share: share_view::ShareState,
     compress: compress_view::CompressState,
     relocate: relocate_view::RelocateState,
+    #[cfg(target_os = "macos")]
+    icloud: icloud_view::IcloudState,
     alerts: alerts_view::AlertState,
     dupes: DupState,
     junk: JunkState,
@@ -263,6 +301,12 @@ pub struct HeftApp {
     actions: Vec<Action>,
     /// Showing made-up data (`HEFT_DEMO`), so leave scan history alone.
     demo: bool,
+    #[cfg(target_os = "macos")]
+    fda_note: screens::FdaNote,
+    settings_open: bool,
+    /// Purgeable space on the scanned volume, and when it was read (it
+    /// takes macOS a moment, so not every frame).
+    purgeable: Option<(String, Instant, u64)>,
 }
 
 impl HeftApp {
@@ -315,7 +359,6 @@ impl HeftApp {
             typing: false,
             workspace,
             tools: tools::Tools::new(elevated),
-            #[cfg(any(windows, target_os = "linux"))]
             hardware: hardware::Hardware::new(cc.storage),
             tab: Tab::Suggestions,
             search: search_view::SearchState::default(),
@@ -325,12 +368,14 @@ impl HeftApp {
             share: share_view::ShareState::default(),
             compress: compress_view::CompressState::default(),
             relocate: relocate_view::RelocateState::default(),
+            #[cfg(target_os = "macos")]
+            icloud: icloud_view::IcloudState::default(),
             alerts: alerts_view::AlertState::new(
                 &cc.egui_ctx,
                 get("alerts").as_deref() != Some("0"),
                 get("alert_limit").and_then(|g| g.parse::<u64>().ok()).unwrap_or(10) << 30,
                 get("background").as_deref() == Some("1") || std::env::args().any(|a| a == "--tray"),
-                cfg!(windows) && std::env::args().any(|a| a == "--tray"),
+                cfg!(any(windows, target_os = "macos")) && std::env::args().any(|a| a == "--tray"),
             ),
             live: live::LiveState::new(get("auto_update").as_deref() == Some("1")),
             junk: JunkState { results: Vec::new(), checked: HashSet::new(), key: None },
@@ -356,8 +401,20 @@ impl HeftApp {
             notices: crossbeam_channel::unbounded(),
             actions: Vec::new(),
             demo: false,
+            #[cfg(target_os = "macos")]
+            fda_note: screens::FdaNote::new(get("fda_note").as_deref() == Some("0")),
+            settings_open: false,
+            purgeable: None,
         };
+        #[cfg(target_os = "macos")]
+        {
+            platform::set_trash_through_finder(get("finder_trash").as_deref() == Some("1"));
+            crate::mac::apps::updaters::set_check_feeds(get("update_feeds").as_deref() == Some("1"));
+        }
         app.refresh_drives();
+        if cfg!(debug_assertions) && std::env::var_os("HEFT_DEBUG_SETTINGS").is_some() {
+            app.settings_open = true;
+        }
         if std::env::var_os("HEFT_DEMO").is_some() {
             app.demo = true;
             app.set_tree(crate::demo::tree(), false);
@@ -514,6 +571,8 @@ impl HeftApp {
         self.poll_share();
         self.poll_compress();
         self.poll_relocate();
+        #[cfg(target_os = "macos")]
+        self.poll_icloud();
         self.poll_alerts(ctx);
         while let Ok((msg, err)) = self.notices.1.try_recv() {
             self.toast(msg, err);
@@ -602,10 +661,17 @@ impl HeftApp {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            // Like Finder, leave apps that are running where they are.
+            #[cfg(target_os = "macos")]
+            let running = crate::compress::InUse::now();
             let res = items
                 .into_iter()
                 .map(|(id, path)| {
-                    let r = trash::delete(&path).map_err(|e| e.to_string());
+                    #[cfg(target_os = "macos")]
+                    if let Some(app) = running.program_using(std::path::Path::new(&path)) {
+                        return (id, path, Err(format!("{app} is open. Quit it first.")));
+                    }
+                    let r = crate::trashlog::move_to_trash(&path);
                     (id, path, r)
                 })
                 .collect();
@@ -615,7 +681,7 @@ impl HeftApp {
         self.delete_job = Some(DeleteJob { rx });
     }
 
-    fn finish_delete(&mut self, results: Vec<(NodeId, String, Result<(), String>)>) {
+    fn finish_delete(&mut self, results: Deleted) {
         let Some(arc) = self.tree.as_mut() else { return };
         let tree = Arc::make_mut(arc);
         let mut freed = 0u64;
@@ -625,10 +691,19 @@ impl HeftApp {
         let now = platform::now_unix();
         for (id, path, r) in results {
             match r {
-                Ok(()) => {
+                Ok(landed) => {
                     let n = tree.node(id);
                     freed += n.size;
-                    logged.push(crate::trashlog::Removed { when: now, size: n.size, is_dir: n.is_dir(), path, restored: false });
+                    let (trashed_at, trash_id) = landed.map_or((None, 0), |(at, id)| (Some(at), id));
+                    logged.push(crate::trashlog::Removed {
+                        when: now,
+                        size: n.size,
+                        is_dir: n.is_dir(),
+                        path,
+                        trashed_at,
+                        trash_id,
+                        restored: false,
+                    });
                     tree.remove(id);
                     ok += 1;
                 }
@@ -748,6 +823,10 @@ impl HeftApp {
                     }
                 }
                 Action::Compress(ids) => self.open_compress(&ids),
+                #[cfg(target_os = "macos")]
+                Action::RemoveDownload(ids) => self.open_remove_download(&ids),
+                #[cfg(not(target_os = "macos"))]
+                Action::RemoveDownload(_) => {}
                 Action::Relocate(id) => self.open_relocate(id),
                 Action::ScanPath(p) => self.start_scan(&p, ctx),
                 Action::Rescan => self.rescan(ctx),
@@ -864,6 +943,14 @@ impl HeftApp {
             self.actions.push(Action::Compress(vec![id]));
             ui.close();
         }
+        #[cfg(target_os = "macos")]
+        if !self.demo && n.flags & crate::tree::flags::CLOUD == 0 && self.icloud.offered(tree, id) {
+            let hint = "Free the space here. It stays in iCloud Drive and downloads again when you open it";
+            if ui.button("Remove download…").on_hover_text(hint).clicked() {
+                self.actions.push(Action::RemoveDownload(vec![id]));
+                ui.close();
+            }
+        }
         if n.is_dir() && id != ROOT && !self.demo && ui.button("Move to another drive…").on_hover_text("Frees space here and leaves a link, so nothing loses track of it").clicked() {
             self.actions.push(Action::Relocate(id));
             ui.close();
@@ -892,6 +979,45 @@ impl HeftApp {
         }
     }
 
+    /// macOS: put Heft's menus at the top of the screen (once), keep the View
+    /// menu's ticks current, and do what was chosen in them.
+    #[cfg(target_os = "macos")]
+    fn mac_menus(&mut self, ctx: &egui::Context) {
+        use crate::mac::appmenu::{self, Command};
+        let pages: Vec<&str> = Workspace::ALL.iter().map(|w| w.label()).collect();
+        appmenu::install(ctx, &pages);
+        let page = Workspace::ALL.iter().position(|&w| w == self.workspace).unwrap_or(0);
+        appmenu::set_state(page, ctx.global_style().visuals.dark_mode);
+        for c in appmenu::take() {
+            match c {
+                Command::Settings => self.settings_open = true,
+                Command::ScanFolder => {
+                    if self.scan.is_none()
+                        && let Some(p) = rfd::FileDialog::new().set_title("Choose a folder to scan").pick_folder()
+                    {
+                        self.actions.push(Action::ScanPath(p.to_string_lossy().into_owned()));
+                    }
+                }
+                Command::Rescan if self.tree.is_some() && self.scan.is_none() => {
+                    self.workspace = Workspace::Disk;
+                    self.actions.push(Action::Rescan);
+                }
+                Command::Rescan => {}
+                Command::Page(i) => {
+                    if let Some(&w) = Workspace::ALL.get(i) {
+                        self.workspace = w;
+                    }
+                }
+                Command::ToggleDarkMode => {
+                    let dark = ctx.global_style().visuals.dark_mode;
+                    ctx.set_theme(if dark { egui::Theme::Light } else { egui::Theme::Dark });
+                }
+                Command::Help => crate::mac::open_url("https://gjnail.github.io/heft/guides/"),
+                Command::ReportProblem => crate::mac::open_url("https://github.com/gjnail/heft/issues/new/choose"),
+            }
+        }
+    }
+
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Heft").strong().size(17.0));
@@ -911,6 +1037,7 @@ impl HeftApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                theme_toggle::button(ui);
                 if !platform::CAN_ELEVATE {
                     return;
                 }
@@ -998,9 +1125,17 @@ impl HeftApp {
                     egui::Checkbox::new(&mut self.live.auto, "Update automatically"),
                 );
                 let why = if self.live.state.is_some() {
-                    "Keeps the map current using the NTFS change journal, checking every few seconds"
-                } else {
+                    if cfg!(windows) {
+                        "Keeps the map current using the NTFS change journal, checking every few seconds"
+                    } else {
+                        "Keeps the map current: macOS says when something changes, and Heft reads just what changed"
+                    }
+                } else if cfg!(windows) {
                     "Needs a fast (MFT) scan: run Heft as administrator on an NTFS drive"
+                } else if cfg!(target_os = "macos") {
+                    "Needs a scan of a folder on a local disk that keeps a history of changes (network shares don't)"
+                } else {
+                    "Only available on Windows and macOS"
                 };
                 live.on_hover_text(why).on_disabled_hover_text(why);
                 ui.separator();
@@ -1073,10 +1208,14 @@ impl HeftApp {
                     crate::tree::ScanMode::Mft => RichText::new("MFT scan").color(Color32::from_rgb(250, 200, 70)),
                     crate::tree::ScanMode::Walk => RichText::new("standard scan"),
                 };
-                ui.label(mode);
+                let mode = ui.label(mode);
+                if cfg!(target_os = "macos") && self.live.state.is_some() {
+                    mode.on_hover_text("Rescan reads only the folders macOS has logged changes in");
+                }
                 if self.live.auto && self.live.state.is_some() {
+                    let changes = if cfg!(windows) { "Changes on the drive" } else { "Changes on the disk" };
                     ui.label(RichText::new("· updating live").color(Color32::from_rgb(110, 200, 120)))
-                        .on_hover_text("Changes on the drive show up within a few seconds");
+                        .on_hover_text(format!("{changes} show up within a few seconds"));
                 }
                 let phases: Vec<String> =
                     tree.info.phases.iter().map(|(n, ms)| format!("{}: {}", n.trim(), fmt_duration_ms(*ms))).collect();
@@ -1097,7 +1236,26 @@ impl HeftApp {
                 if !self.demo
                     && let Some((total, free)) = platform::free_space(&tree.root_path)
                 {
-                    ui.label(RichText::new(format!("· {} free of {}", fmt_size(free), fmt_size(total))).weak());
+                    let fresh = self.purgeable.as_ref().is_some_and(|(r, at, _)| *r == tree.root_path && at.elapsed() < Duration::from_secs(30));
+                    if !fresh {
+                        let p = platform::purgeable_space(&tree.root_path, free);
+                        self.purgeable = Some((tree.root_path.clone(), Instant::now(), p));
+                    }
+                    let purgeable = self.purgeable.as_ref().map_or(0, |p| p.2);
+                    if purgeable >= PURGEABLE_WORTH_SHOWING {
+                        ui.label(
+                            RichText::new(format!(
+                                "· {} free of {} (+{} purgeable)",
+                                fmt_size(free),
+                                fmt_size(total),
+                                fmt_size(purgeable)
+                            ))
+                            .weak(),
+                        )
+                        .on_hover_text(purgeable_hint(purgeable));
+                    } else {
+                        ui.label(RichText::new(format!("· {} free of {}", fmt_size(free), fmt_size(total))).weak());
+                    }
                 }
                 if tree.info.unreadable_dirs > 0 {
                     ui.label(RichText::new(format!("· {} folders unreadable", fmt_count(tree.info.unreadable_dirs))).weak())
@@ -1213,25 +1371,25 @@ impl HeftApp {
 impl eframe::App for HeftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
+        #[cfg(debug_assertions)]
         debug_shot::frame(&ctx, self.workspace == Workspace::Hardware);
-        #[cfg(all(debug_assertions, not(any(windows, target_os = "linux"))))]
-        debug_shot::frame(&ctx, false);
         self.poll(&ctx);
         self.list_hover = None;
         if self.workspace == Workspace::Disk {
             self.handle_keys(&ctx);
         }
 
+        #[cfg(target_os = "macos")]
+        self.mac_menus(&ctx);
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(3.0);
             self.toolbar(ui);
             ui.add_space(2.0);
         });
         self.alert_banner(ui);
+        self.settings_modal(&ctx);
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
 
-        #[cfg(any(windows, target_os = "linux"))]
         if self.workspace == Workspace::Hardware {
             self.hardware.show(ui, self.elevated);
             for e in self.hardware.take_events() {
@@ -1242,7 +1400,6 @@ impl eframe::App for HeftApp {
             }
             return;
         }
-        #[cfg(any(windows, target_os = "linux"))]
         self.hardware.hidden();
 
         if self.workspace != Workspace::Disk {
@@ -1271,6 +1428,8 @@ impl eframe::App for HeftApp {
         self.share_modal(&ctx);
         self.compress_modal(&ctx);
         self.relocate_modal(&ctx);
+        #[cfg(target_os = "macos")]
+        self.remove_download_modal(&ctx);
         if self.delete_job.is_some() {
             egui::Modal::new(egui::Id::new("deleting")).show(&ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -1293,8 +1452,16 @@ impl eframe::App for HeftApp {
         storage.set_string("size_by", if self.size_by_alloc { "disk" } else { "file" }.into());
         storage.set_string("labels", if self.show_labels { "1" } else { "0" }.into());
         storage.set_string("auto_update", if self.live.auto { "1" } else { "0" }.into());
+        #[cfg(target_os = "macos")]
+        {
+            if self.fda_note.dismissed {
+                storage.set_string("fda_note", "0".into());
+            }
+            storage.set_string("finder_trash", if platform::trash_through_finder() { "1" } else { "0" }.into());
+            let feeds = crate::mac::apps::updaters::check_feeds();
+            storage.set_string("update_feeds", if feeds { "1" } else { "0" }.into());
+        }
         self.alerts.save(storage);
-        #[cfg(any(windows, target_os = "linux"))]
         self.hardware.save(storage);
     }
 }

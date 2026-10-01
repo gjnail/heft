@@ -39,11 +39,10 @@ pub enum Target {
     Older(&'static str, u32),
     /// Entries of a folder whose names match a `*` pattern (files, or whole
     /// subfolders).
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     Glob(&'static str, &'static str),
     /// Chromium user-data folder + a path inside each profile in it
     /// (`Default`, `Profile 1`, …, and the folder itself for Opera).
-    #[cfg_attr(not(windows), allow(dead_code))]
     Chromium(&'static str, &'static str),
     /// A path inside every subfolder of a folder (Firefox profiles, IDEs).
     EachDir(&'static str, &'static str),
@@ -61,11 +60,13 @@ pub struct Rule {
     pub name: &'static str,
     pub about: &'static str,
     pub default_on: bool,
-    /// Only works as administrator.
+    /// Only works as administrator (on macOS and Linux: after a password
+    /// prompt).
     pub admin: bool,
     /// Side effect worth knowing before ticking the box.
     pub warning: Option<&'static str>,
-    /// Executables that must not be running while cleaning.
+    /// Executables that must not be running while cleaning, in lower case.
+    /// `*` matches any text ("adobe premiere pro *").
     pub close: &'static [&'static str],
     pub targets: &'static [Target],
 }

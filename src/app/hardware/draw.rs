@@ -93,7 +93,21 @@ pub fn thresholds(class: Class, detail: &str, s: &Sensor) -> Thresholds {
             why: "Hot and too hot are the limits the device itself reports.",
         };
     }
+    // Apple silicon's processor and GPU are one chip, built to run hotter.
+    let apple_silicon = cfg!(all(target_os = "macos", target_arch = "aarch64"));
     let (warm, hot, critical, why) = match class {
+        Class::Cpu if apple_silicon => (
+            85.0,
+            95.0,
+            105.0,
+            "Rule of thumb for Apple silicon, which runs its cores at 90-100 °C under sustained load and slows itself down when it gets hotter. Warm or hot while busy is normal; the same while idle suggests a problem.",
+        ),
+        Class::Gpu if apple_silicon => (
+            85.0,
+            95.0,
+            105.0,
+            "Rule of thumb for Apple silicon. The GPU shares the chip with the processor and, like it, can run at 90-100 °C under sustained load before slowing itself down.",
+        ),
         Class::Cpu => (
             75.0,
             85.0,
@@ -116,6 +130,7 @@ pub fn thresholds(class: Class, detail: &str, s: &Sensor) -> Thresholds {
             "Rule of thumb for SSDs. Most start slowing down to protect themselves around 70-80 °C.",
         ),
         Class::Battery => (40.0, 45.0, 55.0, "Batteries age faster above about 40 °C."),
+        _ if cfg!(target_os = "macos") => (60.0, 75.0, 90.0, "Rule of thumb for logic board and other sensors."),
         _ => (60.0, 75.0, 90.0, "Rule of thumb for motherboard and other sensors."),
     };
     Thresholds { warm, hot, critical, why }

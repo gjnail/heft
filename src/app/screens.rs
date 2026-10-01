@@ -9,6 +9,33 @@ use crate::platform;
 use crate::tree::{ScanMode, ROOT};
 use crate::util::{fmt_ago, fmt_count, fmt_duration_ms, fmt_size, pct};
 
+/// The start screen's note about Full Disk Access (macOS).
+#[cfg(target_os = "macos")]
+pub(super) struct FdaNote {
+    pub dismissed: bool,
+    /// When access was last checked, and the answer.
+    checked: Option<(std::time::Instant, Option<bool>)>,
+}
+
+#[cfg(target_os = "macos")]
+impl FdaNote {
+    pub fn new(dismissed: bool) -> FdaNote {
+        FdaNote { dismissed, checked: None }
+    }
+
+    /// Shown while Heft is known not to have access. Checked again every few
+    /// seconds (it's one folder read), so the note goes once access is given.
+    fn shown(&mut self) -> bool {
+        if self.dismissed {
+            return false;
+        }
+        if self.checked.is_none_or(|(at, _)| at.elapsed() > std::time::Duration::from_secs(3)) {
+            self.checked = Some((std::time::Instant::now(), crate::mac::has_full_disk_access()));
+        }
+        self.checked.is_some_and(|(_, access)| access == Some(false))
+    }
+}
+
 impl HeftApp {
     pub(super) fn start_screen(&mut self, ui: &mut egui::Ui) {
         self.accept_dropped_folder(ui);
@@ -59,6 +86,8 @@ impl HeftApp {
                         });
                     ui.add_space(18.0);
                 }
+                #[cfg(target_os = "macos")]
+                self.full_disk_access_note(ui);
 
                 // Drive cards, wrapped.
                 let card = vec2(272.0, 128.0);
@@ -104,7 +133,13 @@ impl HeftApp {
                             (super::Workspace::Startup, "Startup programs"),
                             (super::Workspace::Programs, "Uninstall and update programs"),
                         ];
-                        #[cfg(not(windows))]
+                        #[cfg(target_os = "macos")]
+                        let links = [
+                            (super::Workspace::Cleaner, "Clean junk files"),
+                            (super::Workspace::Startup, "Login items"),
+                            (super::Workspace::Programs, "Uninstall and update apps"),
+                        ];
+                        #[cfg(not(any(windows, target_os = "macos")))]
                         let links = [(super::Workspace::Cleaner, "Clean junk files")];
                         let n = links.len() as f32;
                         let w = n * 230.0 + (n - 1.0) * 10.0;
@@ -118,6 +153,48 @@ impl HeftApp {
                 }
             });
         });
+    }
+
+    /// Until Heft has Full Disk Access or the note is dismissed: what macOS
+    /// hides from Heft without it, and a button to the right settings page.
+    #[cfg(target_os = "macos")]
+    fn full_disk_access_note(&mut self, ui: &mut egui::Ui) {
+        if !self.fda_note.shown() {
+            return;
+        }
+        egui::Frame::group(ui.style())
+            .fill(ui.visuals().faint_bg_color)
+            .corner_radius(8.0)
+            .inner_margin(12.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width(560.0);
+                        ui.label(RichText::new("macOS keeps some folders from Heft until you give it Full Disk Access").strong());
+                        ui.label(
+                            RichText::new(
+                                "Without it, scans count Mail, Messages, Safari, the Trash and other apps' data as unreadable, \
+                                 and the Cleaner and Apps pages can't look inside them. Heft only reads them; nothing leaves \
+                                 your Mac.",
+                            )
+                            .weak(),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new("Turn Heft on in the list (or add it with +), then quit and reopen Heft.").weak().size(11.5),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Not now").on_hover_text("Don't show this again").clicked() {
+                            self.fda_note.dismissed = true;
+                        }
+                        if ui.button("Open Privacy & Security").clicked() {
+                            crate::mac::open_url(crate::mac::FULL_DISK_ACCESS_SETTINGS);
+                        }
+                    });
+                });
+            });
+        ui.add_space(18.0);
     }
 
     fn drive_card(&mut self, ui: &mut egui::Ui, size: egui::Vec2, d: &platform::DriveInfo, last: Option<i64>) -> bool {
@@ -173,6 +250,16 @@ impl HeftApp {
             FontId::proportional(12.0),
             weak,
         );
+        let purgeable = d.purgeable >= super::PURGEABLE_WORTH_SHOWING;
+        if purgeable {
+            p.text(
+                pos2(x, rect.top() + 88.0),
+                Align2::LEFT_CENTER,
+                format!("+ {} purgeable ({} in Finder)", fmt_size(d.purgeable), fmt_size(d.free + d.purgeable)),
+                FontId::proportional(11.5),
+                weak,
+            );
+        }
 
         let fast = d.is_ntfs() && self.elevated && self.use_mft && d.kind != "Network";
         let (badge, badge_color) = if fast {
@@ -196,7 +283,9 @@ impl HeftApp {
                 weak,
             );
         }
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = if purgeable { resp.on_hover_text(super::purgeable_hint(d.purgeable)) } else { resp };
+        resp.clicked()
     }
 
     pub(super) fn accept_dropped_folder(&mut self, ui: &egui::Ui) {

@@ -15,6 +15,13 @@ use crate::util::{fmt_count, fmt_duration_ms, fmt_size};
 
 const ROW_H: f32 = 24.0;
 
+#[cfg(windows)]
+const THIS_COMPUTER: &str = "this PC";
+#[cfg(target_os = "macos")]
+const THIS_COMPUTER: &str = "this Mac";
+#[cfg(not(any(windows, target_os = "macos")))]
+const THIS_COMPUTER: &str = "this computer";
+
 struct Analysis {
     progress: Arc<clean::Progress>,
     rx: Receiver<Found>,
@@ -44,6 +51,8 @@ pub struct State {
     confirm: bool,
     #[cfg(windows)]
     win: super::cleaner_win::WinExtras,
+    #[cfg(target_os = "macos")]
+    mac: super::cleaner_mac::MacExtras,
     started: bool,
     /// Every rule has reported at least once, so "found nothing" is known.
     analyzed_once: bool,
@@ -63,6 +72,8 @@ impl State {
             confirm: false,
             #[cfg(windows)]
             win: super::cleaner_win::WinExtras::new(),
+            #[cfg(target_os = "macos")]
+            mac: super::cleaner_mac::MacExtras::new(),
             started: false,
             analyzed_once: false,
         }
@@ -93,9 +104,7 @@ impl State {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let (p, ctx) = (progress.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let running = clean::running_processes();
-            let out: Vec<Cleaned> = jobs.iter().map(|f| clean::clean(f, &running, &p)).collect();
-            let _ = tx.send(out);
+            let _ = tx.send(clean::clean_all(&jobs, &p));
             ctx.request_repaint();
         });
         self.report = None;
@@ -139,6 +148,8 @@ impl State {
         }
         #[cfg(windows)]
         self.win.poll(ctx);
+        #[cfg(target_os = "macos")]
+        self.mac.poll();
     }
 
     fn set_selected(&mut self, rule: usize, on: bool, cx: &mut Cx) {
@@ -167,6 +178,8 @@ impl State {
             self.start_analysis(&ctx);
             #[cfg(windows)]
             self.win.start(&ctx);
+            #[cfg(target_os = "macos")]
+            self.mac.start(&ctx);
         }
         self.poll(&ctx);
 
@@ -179,6 +192,8 @@ impl State {
         self.confirm_modal(&ctx);
         #[cfg(windows)]
         self.win.modals(&ctx);
+        #[cfg(target_os = "macos")]
+        self.mac.modals(&ctx, &mut cx);
     }
 
     // ------------------------------------------------------------------
@@ -214,7 +229,7 @@ impl State {
                 let label = if self.show_missing {
                     "Hide programs that aren't installed".to_string()
                 } else {
-                    format!("Show {hidden} more (nothing found on this PC)")
+                    format!("Show {hidden} more (nothing found on {THIS_COMPUTER})")
                 };
                 if ui.add(egui::Button::new(RichText::new(label).weak()).frame(false)).clicked() {
                     self.show_missing = !self.show_missing;
@@ -321,7 +336,8 @@ impl State {
                     ui.spinner();
                 }
                 if rule.admin && !cx.elevated {
-                    ui.label(RichText::new("🛡").weak()).on_hover_text("Needs administrator rights");
+                    let why = if clean::asks_password() { "Asks for the administrator password" } else { "Needs administrator rights" };
+                    ui.label(RichText::new("🛡").weak()).on_hover_text(why);
                 }
                 if rule.warning.is_some() {
                     ui.label(RichText::new("⚠").color(AMBER)).on_hover_text(rule.warning.unwrap_or_default());
@@ -459,6 +475,11 @@ impl State {
             ui.separator();
             self.win.footer(ui, cx);
         }
+        #[cfg(target_os = "macos")]
+        {
+            ui.separator();
+            self.mac.footer(ui, cx);
+        }
     }
 
     fn results_table(&mut self, ui: &mut egui::Ui) {
@@ -559,7 +580,7 @@ impl State {
                         if resp.double_clicked() {
                             crate::platform::reveal(&path.to_string_lossy());
                         }
-                        resp.on_hover_text("Double-click to show in Explorer");
+                        resp.on_hover_text(format!("Double-click to show in {}", crate::platform::FILE_MANAGER));
                     }
                 },
             );
@@ -577,8 +598,8 @@ impl State {
             .iter()
             .filter_map(|f| f.rule().warning.map(|w| format!("{} · {}: {w}", f.rule().app, f.rule().name)))
             .collect();
-        // Linux: system caches go through pkexec, which asks for a password.
-        let asks_password = !crate::platform::CAN_ELEVATE && ready.iter().any(|f| f.rule().admin);
+        // macOS and Linux ask for the password once, for every admin rule.
+        let asks_password = clean::asks_password() && !crate::platform::is_elevated() && ready.iter().any(|f| f.rule().admin);
         let mut go = false;
         let mut close = false;
         let resp = egui::Modal::new(egui::Id::new("confirm_clean")).show(ctx, |ui| {
@@ -595,10 +616,11 @@ impl State {
                 .weak(),
             );
             if asks_password {
-                ui.label(
-                    RichText::new("System caches are cleaned by their own tools (apt, journalctl, snap), so you'll be asked for your password.")
-                        .weak(),
-                );
+                #[cfg(target_os = "macos")]
+                let text = "Items marked 🛡 may need the administrator password. macOS asks for it once, at the end.";
+                #[cfg(not(target_os = "macos"))]
+                let text = "System caches are cleaned by their own tools (apt, journalctl, snap), so you'll be asked for your password.";
+                ui.label(RichText::new(text).weak());
             }
             if !warnings.is_empty() {
                 ui.add_space(6.0);

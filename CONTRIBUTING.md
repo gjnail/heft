@@ -19,8 +19,9 @@ change in that area:
    use instead of forcing them.
 5. Keep sizes correct. If two scanners disagree, find out why; `heft --compare`
    exists for that.
-6. Don't add network access. The only exception is winget, when the user asks
-   for updates.
+6. Don't add network access. The only exceptions are winget, Homebrew and
+   `mas`, when the user asks for updates, and, only when the user turned it
+   on in Settings, the update feeds of Mac apps that update themselves.
 7. When replacing or moving files, check the new copy against the original
    (byte for byte, or by hash) before the original is replaced or removed, and
    leave the original untouched if anything fails.
@@ -49,9 +50,13 @@ duplicates, junk, changes, removed), `HEFT_DEBUG_ZOOM`, `HEFT_DEBUG_SELECT`,
 given view after a scan. `HEFT_DEBUG_SHARE` selects all but the oldest copy
 after a duplicate search and opens the Replace with links dialog;
 `HEFT_DEBUG_COMPRESS` and `HEFT_DEBUG_RELOCATE` open the Compress and Move
-dialogs; `HEFT_DEBUG_LOW` pretends every drive is almost full; and
-`HEFT_DEBUG_TRAY`, with `--tray`, runs through the notification-area icon on
-its own and logs the result to `heft-tray-selftest.txt` in the temp folder.
+dialogs; `HEFT_DEBUG_ORPHANS`, with `--open=programs`, looks for leftovers of
+deleted apps on macOS; `HEFT_DEBUG_SETTINGS` opens Settings, and on macOS
+`HEFT_DEBUG_MENU` writes the menu bar's menus to `heft-menu.txt` in the temp
+folder; `HEFT_DEBUG_LOW` pretends every drive is almost full; and
+`HEFT_DEBUG_TRAY`, with `--tray`, runs through the notification-area icon
+(Windows) or the menu bar icon (macOS) on its own and logs the result to
+`heft-tray-selftest.txt` in the temp folder.
 `HEFT_HISTORY_DIR` and `HEFT_DATA_DIR` move scan history and the removed list
 somewhere else, so tests don't touch your own.
 
@@ -61,15 +66,24 @@ somewhere else, so tests don't touch your own.
 the window up first. On the Hardware page the delay counts sensor readings
 instead, and `HEFT_DEBUG_HW_VIEW` (`dashboard` or `table`) and
 `HEFT_DEBUG_HW_FOCUS=<sensor label>` pick what's shown. Open other pages with
-`--open=cleaner`, `--open=hardware` and so on. The screenshots in
+`--open=cleaner`, `--open=hardware`, `--open=startup`, `--open=programs`,
+`--open=registry` (Windows) and `--open=broken` (macOS). The screenshots in
 `site/images` are taken this way at 1360x860 in the light theme and converted
 to WebP. These runs save view settings such as the color mode like any other
 run, so reset them afterwards.
 
 Some tests change real system state, so they're ignored by default. `cargo
-test -- --ignored` moves a file to the Recycle Bin and restores it, shows a
-notification-area icon for a moment, and adds and removes the Start with
-Windows registry value.
+test -- --ignored` moves a file to the Recycle Bin or Trash and restores it.
+On Windows it also shows a notification-area icon for a moment and adds and
+removes the Start with Windows registry value; on macOS it adds and removes
+the Start at login launch agent.
+
+On macOS, the Login items, Apps and Broken items pages change launchd jobs,
+login items and apps, often after the administrator password prompt. Try
+those actions on something harmless, and read the backups they save in
+`~/Library/Application Support/Heft/backups` (or `$HEFT_DATA_DIR/backups`).
+[`docs/testing-macos.md`](docs/testing-macos.md) walks through everything
+that needs testing by hand on a Mac, on throwaway items.
 
 The MFT record parser has a fuzz target. With a nightly toolchain and
 `cargo install cargo-fuzz`, run `cargo fuzz run mft_record`; CI runs it for
@@ -90,9 +104,11 @@ CI builds and tests on Windows, macOS and Ubuntu for every push and pull
 request.
 
 The Windows-only modules (MFT scanner, startup, programs, registry, winget,
-notification-area icon) are declared with `#[cfg(windows)]` in `main.rs`.
-Shared code must not call them directly. The cleaner is shared, with its
-OS-specific parts in `clean/windows.rs` and `clean/unix.rs`.
+notification-area icon) are declared with `#[cfg(windows)]` in `main.rs`, and
+the macOS-only ones live in `mac/`, declared with
+`#[cfg(target_os = "macos")]`. Shared code must not call them directly. The
+cleaner is shared, with its OS-specific parts in `clean/windows.rs`,
+`clean/unix.rs` and `clean/mac.rs`.
 
 ## Source layout
 
@@ -103,13 +119,14 @@ src/
   demo.rs               the made-up demo disk (HEFT_DEMO)
   tree.rs               arena tree of the scan results
   scan/mft.rs           NTFS master file table reader and change journal rescans (Windows)
+  scan/fsevents.rs      quick rescans from FSEvents history (macOS); scan/walk/update.rs rebuilds the tree
   scan/mft_parse.rs     MFT record parsing, shared with the fuzz target
   scan/walk/            parallel directory scanner, with Win32, getattrlistbulk and std::fs listers
   treemap.rs            treemap layout, shading and render thread
   history.rs            scan snapshots and the Changes comparison
   dupes.rs              duplicate finder
   dedupe.rs             replacing duplicates with hard links or clones
-  compress.rs           NTFS folder compression (Windows)
+  compress.rs           folder compression: NTFS on Windows, APFS and HFS+ on macOS
   relocate.rs           moving a folder to another drive and leaving a link
   recommend.rs          the Suggestions page's rules
   risk.rs               warnings for risky files and folders
@@ -122,14 +139,18 @@ src/
   colors.rs             file categories and color schemes
   icon.rs               app icon, drawn at any size
   platform/             OS integration: drives, trash, file manager, dates
-  clean/                junk cleaner; rules.rs is the Windows catalog, rules_unix.rs macOS and Linux
+  clean/                junk cleaner; rules.rs is the Windows catalog, rules_unix.rs macOS and Linux,
+                        mac.rs the macOS extras (weekly launch agent, administrator commands)
   startup.rs            startup programs (Windows)
   programs.rs           installed programs and leftovers (Windows)
   regclean.rs, reg.rs   registry issues, registry access and .reg backups (Windows)
   winget.rs             updates through winget (Windows)
   winsys.rs             Windows helpers for the maintenance tools
-  sensors/              hardware sensors: sampling thread and history, win/ and linux.rs backends
-  app/                  user interface; tools/ holds the Windows maintenance pages, hardware/ the sensor page
+  mac/                  macOS helpers (property lists, launchd, admin prompt, backups) and tools:
+                        startup.rs login items, apps.rs installed apps and Homebrew, broken.rs broken
+                        items, menubar.rs the menu bar icon and Start at login, notify.rs notifications
+  sensors/              hardware sensors: sampling thread and history, win/, mac/ and linux.rs backends
+  app/                  user interface; tools/ holds the maintenance pages (*_mac.rs for macOS), hardware/ the sensor page
 assets/pawnio/          PawnIO driver modules used for CPU and motherboard sensors (LGPL-2.1)
 build.rs                embeds the icon and version details in heft.exe
 fuzz/                   cargo-fuzz target for the MFT record parser

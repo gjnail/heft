@@ -1,5 +1,6 @@
-//! Keeping a scan current: quick rescans from the NTFS change journal, and
-//! optional automatic updates while Heft is open.
+//! Keeping a scan current: quick rescans from the NTFS change journal
+//! (Windows) or the file system event history (macOS), and optional
+//! automatic updates while Heft is open.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -13,24 +14,53 @@ use crate::scan::{self, Incremental, Progress, RefreshOutcome};
 use crate::tree::{NodeId, Tree};
 use crate::util::fmt_duration_ms;
 
-/// How often automatic updates check the journal, at the most. Rebuilding
+/// How often automatic updates check for changes, at the most. Rebuilding
 /// the tree takes a while on a big drive, so after each update the wait is
 /// stretched to ten times what the rebuild took, to keep the CPU mostly idle.
+/// On macOS updates wait for FSEvents to say something changed instead, so
+/// the wait is shorter.
+#[cfg(not(target_os = "macos"))]
 const EVERY: Duration = Duration::from_secs(5);
+#[cfg(target_os = "macos")]
+const EVERY: Duration = Duration::from_secs(1);
+
+/// macOS: a check even without a change notice, for disks mounted inside
+/// the scanned folder, whose changes the watcher doesn't see.
+#[cfg(target_os = "macos")]
+const FALLBACK: Duration = Duration::from_secs(30);
+
+/// macOS: FSEvents watching the scanned folder while updates are on.
+#[cfg(target_os = "macos")]
+struct Watch {
+    root: String,
+    _watcher: crate::scan::fsevents::Watcher,
+    changed: Arc<std::sync::atomic::AtomicBool>,
+}
 
 pub(super) struct LiveState {
-    /// Left by the last MFT scan; `None` for walker scans and off Windows.
+    /// Left by the last MFT scan (Windows) or scan of a local disk (macOS);
+    /// `None` otherwise.
     pub state: Option<Arc<Mutex<Incremental>>>,
     /// Update the scan automatically while Heft is open.
     pub auto: bool,
     job: Option<(Receiver<RefreshOutcome>, bool)>,
     last: Instant,
     wait: Duration,
+    #[cfg(target_os = "macos")]
+    watch: Option<Watch>,
 }
 
 impl LiveState {
     pub fn new(auto: bool) -> Self {
-        LiveState { state: None, auto, job: None, last: Instant::now(), wait: EVERY }
+        LiveState {
+            state: None,
+            auto,
+            job: None,
+            last: Instant::now(),
+            wait: EVERY,
+            #[cfg(target_os = "macos")]
+            watch: None,
+        }
     }
 
     pub fn busy(&self) -> bool {
@@ -39,8 +69,8 @@ impl LiveState {
 }
 
 impl HeftApp {
-    /// Rescan: from the change journal when the last scan left one to read,
-    /// otherwise a full scan.
+    /// Rescan: from the change journal or event history when the last scan
+    /// left one to read, otherwise a full scan.
     pub(super) fn rescan(&mut self, ctx: &egui::Context) {
         let Some(tree) = self.tree.clone() else { return };
         if self.live.state.is_some() && !self.live.busy() {
@@ -54,13 +84,13 @@ impl HeftApp {
     }
 
     fn start_refresh(&mut self, ctx: &egui::Context, quiet: bool) {
-        let Some(state) = self.live.state.clone() else { return };
+        let (Some(state), Some(tree)) = (self.live.state.clone(), self.tree.clone()) else { return };
         let (tx, rx) = crossbeam_channel::bounded(1);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let progress = Progress::default();
             let outcome = match state.lock() {
-                Ok(mut st) => scan::refresh(&mut st, &progress),
+                Ok(mut st) => scan::refresh(&mut st, &tree, &progress),
                 Err(_) => RefreshOutcome::NeedFullScan("internal error".into()),
             };
             let _ = tx.send(outcome);
@@ -88,7 +118,8 @@ impl HeftApp {
                             self.live.wait = EVERY.max(Duration::from_millis(took * 10));
                             self.swap_tree(tree, !quiet, ctx);
                             if !quiet {
-                                self.toast(format!("Updated from the change journal in {}", fmt_duration_ms(took)), false);
+                                let from = if cfg!(windows) { "the change journal" } else { "file system events" };
+                                self.toast(format!("Updated from {from} in {}", fmt_duration_ms(took)), false);
                             }
                         }
                         RefreshOutcome::NeedFullScan(why) => {
@@ -108,11 +139,52 @@ impl HeftApp {
                 Err(_) => ctx.request_repaint_after(Duration::from_millis(50)),
             }
         }
-        if self.live.auto && self.live.state.is_some() {
-            if self.live.job.is_none() && self.scan.is_none() && self.delete_job.is_none() && !self.share.busy() && !self.compress.busy() && !self.relocate.busy() && self.live.last.elapsed() >= self.live.wait {
+        let on = self.live.auto && self.live.state.is_some();
+        let idle = self.live.job.is_none()
+            && self.scan.is_none()
+            && self.delete_job.is_none()
+            && !self.share.busy()
+            && !self.compress.busy()
+            && !self.relocate.busy();
+        #[cfg(not(target_os = "macos"))]
+        if on {
+            if idle && self.live.last.elapsed() >= self.live.wait {
                 self.start_refresh(ctx, true);
             }
             ctx.request_repaint_after(Duration::from_secs(1));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let root = self.tree.as_ref().map(|t| t.root_path.clone()).filter(|_| on);
+            if self.live.watch.as_ref().map(|w| &w.root) != root.as_ref() {
+                self.live.watch = root.and_then(|root| {
+                    let changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let (flag, repaint) = (changed.clone(), ctx.clone());
+                    let watcher = crate::scan::fsevents::watch(std::slice::from_ref(&root), move || {
+                        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        repaint.request_repaint();
+                    })?;
+                    Some(Watch { root, _watcher: watcher, changed })
+                });
+            }
+            if on {
+                // Without a watcher, fall back to checking every few seconds.
+                let (changed, every) = match &self.live.watch {
+                    Some(w) => (w.changed.load(std::sync::atomic::Ordering::Relaxed), FALLBACK),
+                    None => (true, Duration::from_secs(5)),
+                };
+                let due = (changed && self.live.last.elapsed() >= self.live.wait) || self.live.last.elapsed() >= every;
+                if idle && due {
+                    if let Some(w) = &self.live.watch {
+                        w.changed.store(false, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    self.start_refresh(ctx, true);
+                } else {
+                    // Wake up when the next check is due; a change notice wakes us sooner.
+                    let next = if changed { self.live.wait } else { every };
+                    ctx.request_repaint_after(next.saturating_sub(self.live.last.elapsed()).max(Duration::from_millis(100)));
+                }
+            }
         }
     }
 

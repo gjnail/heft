@@ -36,7 +36,7 @@
       <a class="btn btn-primary" href="https://github.com/gjnail/heft/releases/latest">Download Heft 1.0</a>
       <a class="btn btn-secondary" href="tutorial.html">Start the tutorial</a>
     </div>
-    <p class="hero-meta">Windows 10 and 11 · macOS and Linux builds in testing · MIT license · No accounts, no tracking</p>
+    <p class="hero-meta">Windows 10 and 11 · macOS 11 and later · Linux build in testing · MIT license · No accounts, no tracking</p>
   </section>
 
   <div class="hero-shot">
@@ -85,7 +85,7 @@
       <a class="card" href="guides/hardware.html">
         <img src="images/hardware.webp" alt="" loading="lazy" width="1360" height="860">
         <div class="card-body">
-          <span class="tag">Windows · Linux</span>
+          <span class="tag">Windows · macOS · Linux</span>
           <h3>Hardware monitor</h3>
           <p>Temperatures, load, power and fans in a live dashboard, plus every sensor in one table with history charts.</p>
         </div>
@@ -99,7 +99,7 @@
         </div>
       </a>
     </div>
-    <p style="text-align:center;margin-top:24px;color:var(--muted)">Also: <a href="guides/cleaning-up.html#build-junk">build junk</a>, <a href="guides/duplicates.html">duplicates</a>, <a href="guides/alerts.html">free space alerts</a>, and on Windows, <a href="guides/windows-tools.html">startup programs, uninstalling and updates, and registry issues</a>.</p>
+    <p style="text-align:center;margin-top:24px;color:var(--muted)">Also: <a href="guides/cleaning-up.html#build-junk">build junk</a>, <a href="guides/duplicates.html">duplicates</a>, <a href="guides/alerts.html">free space alerts</a>, and on <a href="guides/windows-tools.html">Windows</a> and <a href="guides/mac-tools.html">macOS</a>, tools for what starts when you sign in, uninstalling and updating programs, and entries left pointing at programs you've deleted.</p>
   </section>
 
   <section class="section">
@@ -112,7 +112,7 @@
           <li>Sends files to the Recycle Bin or Trash, and keeps a list so you can restore them.</li>
           <li>Asks twice before removing anything that could stop your computer from starting.</li>
           <li>Cleans only from a fixed list of known locations, and shows the exact files first.</li>
-          <li>Backs up every registry change, and says so when a cleanup won't make your PC faster.</li>
+          <li>Backs up every registry or settings change, and says so when a cleanup won't make your computer faster.</li>
           <li>Never installs drivers and never sends your data anywhere.</li>
         </ul>
         <a href="guides/cleaning-up.html">How Heft keeps deleting safe</a>
@@ -130,16 +130,16 @@
       <div class="stat"><div class="num">6 s</div><p>to scan a 1.5 TB drive with 2.7 million files, compared to about 30 seconds for a regular folder scan.</p></div>
       <div class="stat"><div class="num">24 GB</div><p>that a plain folder scan over-counted on the same drive, mostly hard links in the Windows component store. Heft counts each file once.</p></div>
       <div class="stat"><div class="num">0 bytes</div><p>downloaded from OneDrive, Dropbox or iCloud. Online-only files count as 0 on disk and are never read.</p></div>
-      <div class="stat"><div class="num">Live</div><p>After a fast scan, Rescan reads only what the NTFS change journal says has changed.</p></div>
+      <div class="stat"><div class="num">Live</div><p>Rescan reads only what changed: from the NTFS change journal after a fast scan on Windows, and from the log macOS keeps of changed folders on a Mac.</p></div>
     </div>
   </section>
 
   <section class="section">
     <h2>Runs on</h2>
-    <p class="sub">Heft is built and tested on Windows. The macOS and Linux builds pass the test suite on every change but haven't been tried on real hardware yet, so reports are welcome.</p>
+    <p class="sub">Heft is built and tested on Windows and on an Apple silicon Mac. Intel Macs and the Linux build haven't been tried on real hardware yet, though Linux passes the test suite on every change, so reports are welcome.</p>
     <div class="stats">
       <div class="stat"><div class="num" style="font-size:1.3rem">Windows 10 and 11</div><p>Everything: disk usage with the fast MFT scan, Cleaner, hardware monitor, startup programs, uninstalling and updates, registry issues.</p></div>
-      <div class="stat"><div class="num" style="font-size:1.3rem">macOS 11 and later</div><p>Disk usage and the Cleaner, for Apple Silicon and Intel Macs.</p></div>
+      <div class="stat"><div class="num" style="font-size:1.3rem">macOS 11 and later</div><p>Disk usage, Cleaner, hardware monitor, login items, uninstalling apps and updates through Homebrew, and broken items, for Apple silicon and Intel Macs.</p></div>
       <div class="stat"><div class="num" style="font-size:1.3rem">Linux (x86_64)</div><p>Disk usage, the Cleaner and the hardware monitor.</p></div>
     </div>
   </section>

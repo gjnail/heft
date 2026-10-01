@@ -192,6 +192,34 @@ jobs:
         with:
           name: third-party-licenses
 
+      # Developer ID signing and notarization. Both are skipped, and the app
+      # is signed ad hoc, until the repository variable APPLE_TEAM_ID is set
+      # along with the secrets and variables below. See docs/releasing.md.
+      - name: Import the signing certificate
+        if: vars.APPLE_TEAM_ID != ''
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n "s/.*\"\(Developer ID Application: .* ($TEAM_ID)\)\"/\1/p" | head -1)
+          if [ -z "$identity" ]; then
+            echo "::error::MACOS_CERTIFICATE has no Developer ID Application certificate for team $TEAM_ID"
+            exit 1
+          fi
+          echo "HEFT_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
       - run: bash scripts/bundle-macos.sh
 
       - name: Smoke test
@@ -200,15 +228,51 @@ jobs:
           cat bench.txt
           grep -q "^files" bench.txt
 
+      # Apple checks the app for malware and issues a ticket, which is then
+      # stapled to the app so Gatekeeper accepts it without going online.
+      - name: Notarize
+        if: vars.APPLE_TEAM_ID != ''
+        env:
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$API_KEY" > "$key"
+          auth=(--key "$key" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID")
+          ditto -c -k --keepParent target/Heft.app "$RUNNER_TEMP/notarize.zip"
+          result=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" "${auth[@]}" --wait --timeout 1h --output-format json)
+          echo "$result"
+          if [ "$(jq -r .status <<< "$result")" != Accepted ]; then
+            xcrun notarytool log "$(jq -r .id <<< "$result")" "${auth[@]}" || true
+            echo "::error::Notarization failed"
+            exit 1
+          fi
+          rm "$key"
+          xcrun stapler staple target/Heft.app
+          spctl --assess --type execute --verbose=2 target/Heft.app
+
       - name: Package
         run: |
           mkdir dist
           ditto -c -k --keepParent target/Heft.app "dist/heft-$VERSION-macos-universal.zip"
 
+      - name: Homebrew cask
+        run: bash scripts/homebrew-cask.sh "$VERSION" "dist/heft-$VERSION-macos-universal.zip" homebrew
+
+      - name: Remove the signing keychain
+        if: always() && vars.APPLE_TEAM_ID != ''
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist-macos
           path: dist/*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: homebrew-cask
+          path: homebrew/heft.rb
 
   linux:
     name: Linux
@@ -283,13 +347,17 @@ jobs:
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+          WINDOWS_SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+          MACOS_SIGNED: ${{ vars.APPLE_TEAM_ID != '' }}
         run: |
-          if [ "$SIGNED" = true ]; then
-            signing="heft.exe is code-signed through [SignPath Foundation](https://signpath.org/). The macOS download isn't signed yet, so macOS warns the first time you open Heft."
-          else
-            signing="The downloads aren't code-signed yet, so Windows and macOS warn the first time you open Heft."
-          fi
+          windows="heft.exe is code-signed through [SignPath Foundation](https://signpath.org/)."
+          macos="Heft.app is signed with a Developer ID and notarized by Apple."
+          case "$WINDOWS_SIGNED/$MACOS_SIGNED" in
+            true/true) signing="$windows $macos" ;;
+            true/*) signing="$windows The macOS download isn't signed yet, so macOS warns the first time you open Heft." ;;
+            */true) signing="$macos The Windows download isn't signed yet, so Windows warns the first time you open Heft." ;;
+            *) signing="The downloads aren't code-signed yet, so Windows and macOS warn the first time you open Heft." ;;
+          esac
           cat >> notes.md <<EOF
 
           ## Downloads

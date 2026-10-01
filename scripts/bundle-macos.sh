@@ -2,7 +2,9 @@
 # Build Heft.app. Produces a universal (Apple Silicon + Intel) binary when
 # both Rust targets are installed:
 #   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-# Set HEFT_BUNDLE_ID to use your own bundle identifier.
+# Set HEFT_BUNDLE_ID to use your own bundle identifier, and
+# HEFT_SIGN_IDENTITY to sign with a Developer ID certificate from your
+# keychain instead of ad hoc (see docs/releasing.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -59,6 +61,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>Heft asks System Events to list and change your login items when macOS doesn't let it read them directly.</string>
 </dict>
 </plist>
 PLIST
@@ -71,7 +74,17 @@ for f in LICENSE THIRD-PARTY-LICENSES.txt; do
     fi
 done
 
-# Ad-hoc signature so a locally built app runs without Gatekeeper complaints.
-codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
+if [ -n "${HEFT_SIGN_IDENTITY:-}" ]; then
+    # Developer ID signature with the hardened runtime and a secure
+    # timestamp, which notarization requires. The identity is the
+    # certificate's name, like "Developer ID Application: Name (TEAMID)".
+    codesign --force --options runtime --timestamp \
+        --entitlements packaging/macos/heft.entitlements \
+        --sign "$HEFT_SIGN_IDENTITY" "$app"
+    codesign --verify --strict --verbose=2 "$app"
+else
+    # Ad-hoc signature so a locally built app runs without Gatekeeper complaints.
+    codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
+fi
 
 echo "Built $app"

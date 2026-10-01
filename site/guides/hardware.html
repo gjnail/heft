@@ -39,6 +39,7 @@
       <li><a href="cleaner.html">The Cleaner</a></li>
       <li><a href="hardware.html" aria-current="page">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -47,7 +48,7 @@
   <main id="main" class="prose">
     <p class="breadcrumb"><a href="index.html">Guides</a></p>
     <h1>Hardware monitor</h1>
-    <span class="platforms">Windows · Linux</span>
+    <span class="platforms">Windows · macOS · Linux</span>
     <p class="lede">The Hardware page shows temperatures, load, clocks, power and fans for every device in your computer, live, with history.</p>
 
     <nav class="toc" aria-label="On this page">
@@ -76,9 +77,9 @@
     <h2 id="charts">History charts</h2>
     <figure class="shot">
       <a href="../images/hardware-chart.webp"><img src="../images/hardware-chart.webp" width="1360" height="860" loading="lazy" alt="A one-minute history chart of total CPU load above the sensor table"></a>
-      <figcaption>Click any reading for its history. Ctrl-click another reading of the same kind to compare them on one chart.</figcaption>
+      <figcaption>Click any reading for its history. Ctrl-click (Cmd-click on a Mac) another reading of the same kind to compare them on one chart.</figcaption>
     </figure>
-    <p>Click any reading, on the dashboard or in the table, to open a chart of its history over the last 1, 5 or 10 minutes, with its minimum, average and maximum. <kbd>Ctrl</kbd>-click more readings of the same kind, such as two temperatures or several cores, to compare them. Heft keeps ten minutes of history for every reading.</p>
+    <p>Click any reading, on the dashboard or in the table, to open a chart of its history over the last 1, 5 or 10 minutes, with its minimum, average and maximum. <kbd>Ctrl</kbd>-click (<kbd>Cmd</kbd>-click on a Mac) more readings of the same kind, such as two temperatures or several cores, to compare them. Heft keeps ten minutes of history for every reading.</p>
 
     <h2 id="logging">Logging and settings</h2>
     <ul>
@@ -98,7 +99,15 @@
     </ul>
     <p><strong>Windows, with PawnIO installed and Heft running as administrator,</strong> also: CPU temperature and package power on AMD Zen and Intel processors, and fans, fan drive, voltages and board temperatures from the Nuvoton sensor chips (NCT679x and NCT6701D) on most ASUS and ASRock motherboards.</p>
     <p><strong>Linux:</strong> the same page from <code>/proc</code> and <code>/sys/class/hwmon</code>, with no extra driver. What you see depends on which sensor drivers your kernel loads.</p>
-    <p>macOS isn't supported yet.</p>
+    <p><strong>macOS, with no administrator password and no driver:</strong></p>
+    <ul>
+      <li>CPU and GPU temperature, and load and clock speed per core, with performance and efficiency cores shown separately on Apple silicon;</li>
+      <li>power for the CPU, GPU, Neural Engine and memory, and for the whole system;</li>
+      <li>fan speeds, on Macs that have fans;</li>
+      <li>drive temperature, wear and throughput, network speed and memory;</li>
+      <li>the battery's charge, wear, cycle count and charge rate.</li>
+    </ul>
+    <p>The Mac readings come from the same sources other Mac monitors use. Heft has been tested on Apple silicon; Intel Macs haven't been tried yet. If a reading is missing or wrong on your Mac, run <code>heft --sensors --report --out report.txt</code> in Terminal (with Heft.app, <code>/Applications/Heft.app/Contents/MacOS/heft</code>) and attach the file to an <a href="https://github.com/gjnail/heft/issues">issue</a>. Apple silicon runs its cores at 90 to 100 °C under sustained load and slows itself down when it gets hotter, so Warm or Hot while the Mac is busy is normal. Hover over the label for the thresholds.</p>
 
     <h2 id="pawnio">CPU temperature and board sensors on Windows</h2>
     <p>Windows doesn't let normal programs read the CPU's temperature or the motherboard's fan and voltage chip. That needs a kernel driver. Heft uses <a href="https://pawnio.eu">PawnIO</a>, a signed, open-source driver that LibreHardwareMonitor and FanControl also use. Heft never installs drivers itself, so this step is up to you.</p>

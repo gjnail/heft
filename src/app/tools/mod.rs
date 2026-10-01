@@ -1,16 +1,24 @@
 //! The maintenance workspaces: the junk cleaner on every platform, plus
 //! startup programs, installed programs (uninstall + updates) and registry
-//! issues on Windows.
+//! issues on Windows, and login items, apps and broken items on macOS.
 
+#[cfg(target_os = "macos")]
+mod broken_mac;
 mod cleaner;
+#[cfg(target_os = "macos")]
+mod cleaner_mac;
 #[cfg(windows)]
 mod cleaner_win;
 #[cfg(windows)]
 mod programs;
+#[cfg(target_os = "macos")]
+mod programs_mac;
 #[cfg(windows)]
 mod registry;
 #[cfg(windows)]
 mod startup;
+#[cfg(target_os = "macos")]
+mod startup_mac;
 
 use eframe::egui::{self, vec2, Color32, Rect, Response, RichText};
 
@@ -20,7 +28,7 @@ use super::Workspace;
 pub enum Event {
     Toast(String, bool),
     /// Switch to Disk usage and scan this folder.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     Scan(String),
     /// Restart elevated, reopening the current workspace.
     Elevate,
@@ -35,6 +43,12 @@ pub struct Tools {
     programs: programs::State,
     #[cfg(windows)]
     registry: registry::State,
+    #[cfg(target_os = "macos")]
+    startup: startup_mac::State,
+    #[cfg(target_os = "macos")]
+    programs: programs_mac::State,
+    #[cfg(target_os = "macos")]
+    broken: broken_mac::State,
     events: Vec<Event>,
 }
 
@@ -49,6 +63,12 @@ impl Tools {
             programs: programs::State::default(),
             #[cfg(windows)]
             registry: registry::State::default(),
+            #[cfg(target_os = "macos")]
+            startup: startup_mac::State::default(),
+            #[cfg(target_os = "macos")]
+            programs: programs_mac::State::default(),
+            #[cfg(target_os = "macos")]
+            broken: broken_mac::State::default(),
             events: Vec::new(),
         }
     }
@@ -57,16 +77,16 @@ impl Tools {
         let cx = Cx { elevated: self.elevated, events: &mut self.events };
         match ws {
             Workspace::Cleaner => self.cleaner.show(ui, cx),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             Workspace::Startup => self.startup.show(ui, cx),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             Workspace::Programs => self.programs.show(ui, cx),
             #[cfg(windows)]
             Workspace::Registry => self.registry.show(ui, cx),
+            #[cfg(target_os = "macos")]
+            Workspace::Broken => self.broken.show(ui, cx),
             // Drawn by the app itself.
-            #[cfg(any(windows, target_os = "linux"))]
-            Workspace::Hardware => {}
-            Workspace::Disk => {}
+            Workspace::Hardware | Workspace::Disk => {}
         }
     }
 

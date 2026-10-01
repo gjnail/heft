@@ -1,5 +1,5 @@
-//! Compressing folders you rarely change (Windows, NTFS), from a folder's
-//! menu or the Suggestions page.
+//! Compressing folders you rarely change (Windows NTFS, macOS APFS and
+//! HFS+), from a folder's menu or the Suggestions page.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,6 +19,8 @@ use crate::util::{fmt_count, fmt_size};
 pub(super) struct CompressState {
     dialog: Option<Dialog>,
     level: Level,
+    /// macOS: also do the files only root can change, after the password.
+    with_admin: bool,
     job: Option<Job>,
     /// (tree root, whether that drive supports compression).
     supported: Option<(String, bool)>,
@@ -38,7 +40,40 @@ struct Dialog {
     /// Bytes in files that are already compressed formats, or too small.
     skipped: u64,
     risk: Option<crate::risk::Risk>,
+    /// Some of the files are inside an app bundle (macOS).
+    has_apps: bool,
+    /// macOS: files in apps installed for all users, which only root can
+    /// change. Kept apart, and only done if the user agrees to the password.
+    admin_files: Vec<(String, u64)>,
 }
+
+#[cfg(not(target_os = "macos"))]
+const HOW: &str = "Windows keeps these files compressed and unpacks them as they're read. They stay where they are and \
+                   open as usual, if a little slower on an old computer. This suits programs and games you don't update \
+                   often, and old projects or documents.";
+#[cfg(target_os = "macos")]
+const HOW: &str = "macOS keeps these files compressed and unpacks them as they're read, the way it stores its own system \
+                   files. They stay where they are and open as usual, if a little slower on an old Mac. This suits apps \
+                   and games you don't update often, and old projects or documents.";
+
+#[cfg(not(target_os = "macos"))]
+const LATER: &str = "If a program changes one of these files later, that file is stored uncompressed again. Nothing \
+                     else changes.";
+#[cfg(target_os = "macos")]
+const LATER: &str = "If an app changes one of these files later, that file is stored uncompressed again. Each file is \
+                     compressed into a copy next to it, checked byte for byte against the original and only then \
+                     swapped in, keeping its dates, permissions and tags.";
+
+#[cfg(not(target_os = "macos"))]
+const SAFE_HERE: &str = "Compressing is safe here. Files a running program has open are skipped.";
+#[cfg(target_os = "macos")]
+const SAFE_HERE: &str = "Compressing is safe here. Files that apps have open, and apps that are running, are skipped.";
+
+#[cfg(not(target_os = "macos"))]
+const NOT_SYSTEM: &str = "Heft won't compress system files. Windows can compress itself safely: run \
+                          `compact /CompactOS:always` in a terminal opened as administrator.";
+#[cfg(target_os = "macos")]
+const NOT_SYSTEM: &str = "Heft won't compress system files. macOS already keeps its own files compressed.";
 
 #[derive(Default)]
 struct Progress {
@@ -78,7 +113,8 @@ impl HeftApp {
     /// Open the compression dialog for some folders.
     pub(super) fn open_compress(&mut self, folders: &[NodeId]) {
         let Some(tree) = self.tree.clone() else { return };
-        let mut d = Dialog { title: String::new(), files: Vec::new(), on_disk: 0, skipped: 0, risk: None };
+        let mut d =
+            Dialog { title: String::new(), files: Vec::new(), on_disk: 0, skipped: 0, risk: None, has_apps: false, admin_files: Vec::new() };
         d.title = match folders {
             [one] => {
                 let path = tree.path(*one);
@@ -100,7 +136,14 @@ impl HeftApp {
                 }
                 d.on_disk += n.alloc;
                 if compress::worth_trying(tree.ext_name(id), n.size) {
-                    d.files.push((tree.path(id), n.size));
+                    let path = tree.path(id);
+                    d.has_apps |= cfg!(target_os = "macos") && path.to_lowercase().contains(".app/contents/");
+                    #[cfg(target_os = "macos")]
+                    if compress::needs_admin(Path::new(&path)) {
+                        d.admin_files.push((path, n.size));
+                        continue;
+                    }
+                    d.files.push((path, n.size));
                 } else {
                     d.skipped += n.alloc;
                 }
@@ -144,23 +187,52 @@ impl HeftApp {
 
         let Some(d) = &self.compress.dialog else { return };
         let mut level = self.compress.level;
+        let mut with_admin = self.compress.with_admin;
         let (mut go, mut undo, mut close) = (false, false, false);
         let blocked = d.risk.filter(|r| r.level == RiskLevel::Danger);
         let resp = egui::Modal::new(egui::Id::new("confirm_compress")).show(ctx, |ui| {
             ui.set_width(560.0);
             ui.heading(&d.title);
             ui.add_space(4.0);
-            ui.label(format!("{} files to try · {} on disk now", fmt_count(d.files.len() as u64), fmt_size(d.on_disk)));
+            let n = d.files.len() + if with_admin { d.admin_files.len() } else { 0 };
+            ui.label(format!("{} files to try · {} on disk now", fmt_count(n as u64), fmt_size(d.on_disk)));
             ui.add_space(6.0);
-            ui.label(
-                "Windows keeps these files compressed and unpacks them as they're read. They stay where they \
-                 are and open as usual, if a little slower on an old computer. This suits programs and games you \
-                 don't update often, and old projects or documents.",
-            );
-            ui.label(
-                "If a program changes one of these files later, that file is stored uncompressed again. Nothing \
-                 else changes.",
-            );
+            ui.label(HOW);
+            ui.label(LATER);
+            if cfg!(target_os = "macos") {
+                ui.label(
+                    RichText::new(
+                        "Files that belong to macOS or another user, locked files and files with more than one name \
+                         are left as they are. Time Machine backs the compressed files up once more.",
+                    )
+                    .weak(),
+                );
+            }
+            if !d.admin_files.is_empty() {
+                ui.add_space(4.0);
+                let size: u64 = d.admin_files.iter().map(|f| f.1).sum();
+                ui.checkbox(
+                    &mut with_admin,
+                    format!(
+                        "Also the {} files ({}) in apps installed for all users, which asks for your administrator password",
+                        fmt_count(d.admin_files.len() as u64),
+                        fmt_size(size)
+                    ),
+                )
+                .on_hover_text(
+                    "Apps from the App Store and from installer packages belong to the system. Heft does the same careful \
+                     copy, check and swap for their files as root.",
+                );
+            }
+            if d.has_apps {
+                ui.label(
+                    RichText::new(
+                        "macOS protects apps from being changed by other apps. If it stops Heft, allow Heft in System \
+                         Settings \u{203a} Privacy & Security \u{203a} App Management, then try again.",
+                    )
+                    .weak(),
+                );
+            }
             if d.skipped > 0 {
                 ui.label(
                     RichText::new(format!(
@@ -171,30 +243,26 @@ impl HeftApp {
                     .weak(),
                 );
             }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut level, Level::Fast, "Faster to open");
-                ui.radio_value(&mut level, Level::Small, "Smaller, slower to open");
-            });
+            // macOS picks the algorithm itself.
+            if compress::HAS_LEVELS {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut level, Level::Fast, "Faster to open");
+                    ui.radio_value(&mut level, Level::Small, "Smaller, slower to open");
+                });
+            }
             if let Some(r) = &d.risk {
                 ui.add_space(6.0);
                 warnings::explain(ui, r);
                 if r.level == RiskLevel::Danger {
-                    ui.colored_label(
-                        warnings::color(r.level),
-                        "Heft won't compress system files. Windows can compress itself safely: run \
-                         `compact /CompactOS:always` in a terminal opened as administrator.",
-                    );
+                    ui.colored_label(warnings::color(r.level), NOT_SYSTEM);
                 } else {
-                    ui.label(
-                        RichText::new("Compressing is safe here. Files a running program has open are skipped.")
-                            .weak(),
-                    );
+                    ui.label(RichText::new(SAFE_HERE).weak());
                 }
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                let ok = blocked.is_none() && !d.files.is_empty();
+                let ok = blocked.is_none() && (!d.files.is_empty() || (with_admin && !d.admin_files.is_empty()));
                 if ui.add_enabled(ok, egui::Button::new(RichText::new("Compress").strong())).clicked() {
                     go = true;
                 }
@@ -211,19 +279,23 @@ impl HeftApp {
             });
         });
         self.compress.level = level;
+        self.compress.with_admin = with_admin;
         if go || undo {
             if let Some(d) = self.compress.dialog.take() {
-                self.start_compress(d.files, undo, ctx);
+                let admin = if with_admin { d.admin_files } else { Vec::new() };
+                self.start_compress(d.files, admin, undo, ctx);
             }
         } else if close || resp.should_close() {
             self.compress.dialog = None;
         }
     }
 
-    fn start_compress(&mut self, files: Vec<(String, u64)>, undo: bool, ctx: &egui::Context) {
+    /// Compress (or uncompress) `files` as you, then `admin` as root after
+    /// the administrator password (macOS).
+    fn start_compress(&mut self, files: Vec<(String, u64)>, admin: Vec<(String, u64)>, undo: bool, ctx: &egui::Context) {
         let p = Arc::new(Progress::default());
         let level = self.compress.level;
-        let total = files.len() as u64;
+        let total = (files.len() + admin.len()) as u64;
         let (tx, rx) = crossbeam_channel::bounded(1);
         let (p2, ctx) = (p.clone(), ctx.clone());
         std::thread::spawn(move || {
@@ -241,6 +313,19 @@ impl HeftApp {
                 p2.bytes.fetch_add(size, Ordering::Relaxed);
                 out.push((path, size, r));
             }
+            #[cfg(target_os = "macos")]
+            if !admin.is_empty() && !p2.cancel.load(Ordering::Relaxed) {
+                let paths: Vec<String> = admin.iter().map(|a| a.0.clone()).collect();
+                let results = compress::rewrite_as_admin(&paths, undo)
+                    .unwrap_or_else(|e| paths.iter().map(|_| Err(if e == crate::mac::CANCELLED { "the password prompt was cancelled".into() } else { e.clone() })).collect());
+                for ((path, size), r) in admin.into_iter().zip(results) {
+                    p2.done.fetch_add(1, Ordering::Relaxed);
+                    p2.bytes.fetch_add(size, Ordering::Relaxed);
+                    out.push((path, size, r));
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = admin;
             let _ = tx.send(out);
             ctx.request_repaint();
         });

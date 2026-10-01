@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::os::windows::fs::MetadataExt;
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::reg::{Hive, Key};
 use crate::winsys;
@@ -47,6 +47,11 @@ impl Pending {
     pub fn bare_action(&self) -> bool {
         !self.actions.is_empty()
     }
+
+    /// No Windows rule restarts a program.
+    pub fn restarts_app(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Outcome of the special part of cleaning a rule.
@@ -65,6 +70,34 @@ pub fn running_processes() -> HashSet<String> {
 /// Rules marked `admin` need Heft itself to run elevated.
 pub fn can_elevate_tools() -> bool {
     false
+}
+
+/// Windows won't delete a file that's open, so there's no need to look.
+pub fn open_files() -> HashSet<(u64, u64)> {
+    HashSet::new()
+}
+
+pub fn file_id(_path: &Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// Admin rules need Heft elevated, so nothing is left for a password prompt.
+pub fn root_may_remove(_path: &Path) -> bool {
+    false
+}
+
+/// Work for an administrator password prompt: never any on Windows.
+#[derive(Default)]
+pub struct Elevated {}
+
+impl Elevated {
+    pub fn is_empty(&self) -> bool {
+        true
+    }
+
+    pub fn add_files(&mut self, _result: usize, _label: &str, _files: Vec<(PathBuf, u64)>) {}
+
+    pub fn run(self, _out: &mut [super::Cleaned]) {}
 }
 
 /// Value for a `%VAR%` placeholder. Besides the environment, Heft knows a few
@@ -151,7 +184,7 @@ pub fn analyze_special(s: &Special, p: &mut Pending) {
     }
 }
 
-pub fn clean_special(p: &Pending) -> SpecialResult {
+pub fn clean_special(p: &Pending, _changed: bool, _result: usize, _label: &str, _root: &mut Elevated) -> SpecialResult {
     let mut out = SpecialResult::default();
     if let Some((bytes, items)) = p.recycle {
         match winsys::empty_recycle_bin() {

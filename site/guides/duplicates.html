@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Duplicates and saving space · Heft</title>
-  <meta name="description" content="Find duplicate files with Heft, replace copies with hard links or clones, compress folders on NTFS, and move folders to another drive.">
+  <meta name="description" content="Find duplicate files with Heft, replace copies with hard links or clones, compress folders on NTFS and APFS, and move folders to another drive.">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="../images/favicon-32.png" type="image/png">
   <link rel="stylesheet" href="../assets/style.css">
@@ -39,6 +39,7 @@
       <li><a href="cleaner.html">The Cleaner</a></li>
       <li><a href="hardware.html">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -48,15 +49,16 @@
     <p class="breadcrumb"><a href="index.html">Guides</a></p>
     <h1>Duplicates and saving space</h1>
     <span class="platforms">Windows · macOS · Linux</span>
-    <p class="lede">Find duplicate files, and win back space without deleting anything: replace copies with links, compress folders, or move a folder to a bigger drive.</p>
+    <p class="lede">Find duplicate files, and win back space without deleting anything: replace copies with links, compress folders, move a folder to a bigger drive, or keep iCloud Drive files only in iCloud.</p>
 
     <nav class="toc" aria-label="On this page">
       <strong>On this page</strong>
       <ul>
         <li><a href="#finding">Finding duplicates</a></li>
         <li><a href="#links">Replacing copies with links or clones</a></li>
-        <li><a href="#compress">Compressing a folder (Windows)</a></li>
+        <li><a href="#compress">Compressing a folder (Windows and macOS)</a></li>
         <li><a href="#move">Moving a folder to another drive</a></li>
+        <li><a href="#icloud">Removing iCloud Drive downloads (macOS)</a></li>
       </ul>
     </nav>
 
@@ -92,19 +94,20 @@
     </div>
     <p>With clones, scans still show both files at full size, since each is a complete file. The drive's free space shows the difference. Files in system and program folders are always left alone.</p>
 
-    <h2 id="compress">Compressing a folder (Windows)</h2>
+    <h2 id="compress">Compressing a folder (Windows and macOS)</h2>
     <figure class="shot">
       <a href="../images/compress.webp"><img src="../images/compress.webp" width="1360" height="860" loading="lazy" alt="The Compress dialog for a game folder, offering Faster to open or Smaller, slower to open"></a>
       <figcaption>Compressing a game you rarely update. It stays installed and works as before.</figcaption>
     </figure>
-    <p>On NTFS drives, Windows can keep files compressed and unpack them as they're read, the same way <code>compact /EXE</code> does. The files stay where they are and open as usual, if a little slower on an old computer.</p>
+    <p>The system can keep files compressed and unpack them as they're read: on Windows (NTFS drives) the same way <code>compact /EXE</code> does, and on a Mac (APFS and HFS+) with the file system compression Apple uses for macOS's own files. The files stay where they are and open as usual, if a little slower on an old computer.</p>
     <ol>
       <li>Right-click a folder and choose <strong>Compress</strong>.</li>
-      <li>Pick <strong>Faster to open</strong> (XPRESS) or <strong>Smaller, slower to open</strong> (LZX).</li>
+      <li>On Windows, pick <strong>Faster to open</strong> (XPRESS) or <strong>Smaller, slower to open</strong> (LZX). On a Mac there's no choice to make, because macOS picks the compression method.</li>
       <li>Press <strong>Compress</strong>. Heft reports how much space it saved when it's done.</li>
     </ol>
-    <p>When a program later changes one of the files, that file is stored uncompressed again. So this suits programs and games you don't update often, and old projects. Photos, video, music and archives are already compressed and are skipped. The Suggestions tab lists programs and games that haven't changed in three months.</p>
+    <p>When a program later changes one of the files, that file is stored uncompressed again. So this suits programs, apps and games you don't update often, and old projects. Photos, video, music and archives are already compressed and are skipped, and so are disk images and installer packages. The Suggestions tab lists programs, apps and games that haven't changed in three months.</p>
     <p>Files a running program has open are skipped. <strong>Uncompress</strong> in the same dialog undoes it, as long as the drive has room for the files at full size. Heft won't compress Windows itself; for that, run <code>compact /CompactOS:always</code> as administrator.</p>
+    <p><strong>On a Mac,</strong> each file is compressed into a copy, checked byte for byte against the original, and only then swapped in, so the original is untouched if anything goes wrong. Files that belong to macOS, locked files, hard links and apps that are running are skipped; macOS already keeps its own files compressed. Apps installed for all users, from the App Store or an installer package, belong to the system: the dialog offers to include them, and Heft then does the same copy, check and swap for their files as root, after your administrator password. Before Heft changes an app from another developer, macOS may ask you to allow Heft under System Settings › Privacy &amp; Security › App Management.</p>
 
     <h2 id="move">Moving a folder to another drive</h2>
     <p>Running out of room on a small system drive? Move a big folder to another drive and leave a link behind, so programs that use the old location still find it.</p>
@@ -115,6 +118,14 @@
     </ol>
     <p>The original goes to the Recycle Bin or Trash; empty it to get the space back. Keep the other drive connected, since anything that uses the folder fails while it's missing.</p>
     <p>Heft won't move system folders, the folder you scanned, folders that are already links or contain links, or folders with online-only files (copying them would download them). To undo a move, delete the link and move the folder back.</p>
+
+    <h2 id="icloud">Removing iCloud Drive downloads (macOS)</h2>
+    <p>Files in iCloud Drive are usually downloaded to the Mac as well. Removing the download frees the space here while the file stays in iCloud, the same thing Finder's <strong>Remove Download</strong> does.</p>
+    <ol>
+      <li>Right-click a file or folder in iCloud Drive (or in Desktop and Documents, if they sync with iCloud) and choose <strong>Remove download</strong>. The Suggestions page also lists big iCloud Drive files that haven't changed in a month.</li>
+      <li>Heft lists the files and how much space they take, and removes the downloads once you confirm.</li>
+    </ol>
+    <p>Nothing is deleted: each file stays in its folder and downloads again when you open it, which needs an internet connection. Heft only touches files iCloud has finished uploading and whose copy here is the current version, so a change that exists only on this Mac can't be lost. With <strong>Optimize Mac Storage</strong> on in iCloud Drive's settings, macOS does the same by itself when space runs low.</p>
 
     <div class="pager">
       <a href="cleaning-up.html"><small>Previous</small>Cleaning up safely</a>

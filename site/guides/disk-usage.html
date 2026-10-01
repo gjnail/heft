@@ -39,6 +39,7 @@
       <li><a href="cleaner.html">The Cleaner</a></li>
       <li><a href="hardware.html">Hardware monitor</a></li>
       <li><a href="windows-tools.html">Startup, programs, registry</a></li>
+      <li><a href="mac-tools.html">Login items, apps, broken items</a></li>
       <li><a href="alerts.html">Free space alerts</a></li>
       <li><a href="command-line.html">Command line</a></li>
     </ul>
@@ -72,6 +73,7 @@
       <li><strong>Folder scan (everywhere else).</strong> Heft lists folders on many threads at once. It works without special rights on every system, just more slowly.</li>
     </ul>
     <p>After a fast scan, <strong>Rescan</strong> doesn't start from scratch: it reads the NTFS change journal and updates only what changed. Tick <strong>View &gt; Update automatically</strong> and Heft keeps the map current every few seconds while it's open.</p>
+    <p>On a Mac the same works after any scan of a local disk, with no administrator rights or extra permission. macOS keeps a log of which folders changed (FSEvents), so <strong>Rescan</strong> only lists those folders again, and <strong>View &gt; Update automatically</strong> keeps the map current: macOS tells Heft when something changes, so the map updates within a second or two and Heft does nothing in between. On an M5 MacBook Pro, rescanning 480,000 items after a small change takes under a tenth of a second, against 1.7 seconds for a full scan. Network shares always get a full scan.</p>
 
     <h2 id="treemap">The treemap</h2>
     <figure class="shot">

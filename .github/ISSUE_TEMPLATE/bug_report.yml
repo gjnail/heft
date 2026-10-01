@@ -38,6 +38,8 @@ body:
         - Startup programs
         - Installed programs / updates
         - Registry issues
+        - Hardware monitor
+        - Mac tools (login items, apps, broken items)
         - Something else
   - type: textarea
     id: what
@@ -58,3 +60,11 @@ body:
       label: Scan output (for wrong sizes)
       description: Output of `heft --bench <path>`, or on Windows as administrator `heft --compare C:`.
       render: text
+  - type: textarea
+    id: sensors
+    attributes:
+      label: Sensor report (for hardware readings on a Mac)
+      description: >-
+        Attach the file from `heft --sensors --report --out report.txt`
+        (with Heft.app, `/Applications/Heft.app/Contents/MacOS/heft`), and
+        say which reading is wrong and what it should be.
